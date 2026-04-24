@@ -1,0 +1,27 @@
+# Backend
+backend/config.yml
+backend/*.dump
+backend/*.log
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env*
+
+# Loose files
+*.xlsx
+*.pdf
+*.json
+*.dump
+notas.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/
