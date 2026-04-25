@@ -1,15 +1,13 @@
 import { Outlet } from 'react-router-dom'
-import TopNav from './TopNav'
-import ScrollToTop from './ScrollToTop'
+import Sidebar from './Sidebar'
 
 export default function Layout() {
   return (
-    <div className="min-h-screen">
-      <TopNav />
-      <main className="pb-10">
+    <div className="flex h-screen overflow-hidden">
+      <Sidebar />
+      <main className="flex-1 overflow-y-auto no-scrollbar">
         <Outlet />
       </main>
-      <ScrollToTop />
     </div>
   )
 }

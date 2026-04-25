@@ -1,30 +1,21 @@
 import { useState, useEffect, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
 import { api } from '../api/client'
 import { formatCLP, formatPct } from '../lib/formatters'
 import { CATEGORY_COLORS } from '../lib/constants'
-import KpiCard from '../components/KpiCard'
 import Spinner from '../components/Spinner'
 
 const YEARS = [2024, 2025, 2026]
 const MONTH_ABBR = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+const FALLBACK_COLORS = { dot: 'bg-slate-400', text: 'text-slate-300' }
 
-const FALLBACK_COLOR = { bg: 'bg-slate-500/15', text: 'text-slate-300', dot: 'bg-slate-400' }
-
-function AnnualTooltip({ active, payload, label }) {
+function ChartTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
   return (
-    <div style={{
-      background: 'rgba(24,10,56,0.95)',
-      border: '1px solid rgba(255,255,255,0.15)',
-      borderRadius: '0.75rem',
-      padding: '0.75rem',
-      fontSize: '0.875rem',
-    }}>
-      <p className="font-semibold text-white mb-2">{label}</p>
+    <div style={{ background: '#111118', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '0.75rem', padding: '0.75rem', fontSize: '0.8125rem' }}>
+      <p className="font-semibold text-white mb-1.5">{label}</p>
       {payload.map(p => (
         <p key={p.dataKey} style={{ color: p.fill }} className="leading-snug">
           {p.name}: {formatCLP(p.value)}
@@ -34,19 +25,36 @@ function AnnualTooltip({ active, payload, label }) {
   )
 }
 
+function yFmt(v) {
+  if (!v) return '0'
+  if (Math.abs(v) >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
+  return `$${(v / 1_000).toFixed(0)}k`
+}
+
+function InsightRow({ icon, label, value, valueColor = 'text-white/80' }) {
+  return (
+    <div className="flex items-center justify-between py-2.5 border-b border-white/5 last:border-0">
+      <div className="flex items-center gap-2.5">
+        <span className="text-base">{icon}</span>
+        <div>
+          <p className="text-xs font-medium text-white/60">{label}</p>
+        </div>
+      </div>
+      <span className={`text-sm font-bold tabular ${valueColor}`}>{value}</span>
+    </div>
+  )
+}
+
 export default function Annual() {
-  const [year, setYear]     = useState(new Date().getFullYear())
-  const [data, setData]     = useState(null)
+  const [year, setYear]       = useState(new Date().getFullYear())
+  const [data, setData]       = useState(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError]   = useState(null)
-  const navigate = useNavigate()
 
   useEffect(() => {
     setLoading(true)
-    setError(null)
     api.annual(year)
       .then(setData)
-      .catch(() => setError('No se pudo cargar el resumen anual'))
+      .catch(() => {})
       .finally(() => setLoading(false))
   }, [year])
 
@@ -57,10 +65,9 @@ export default function Annual() {
     return Array.from({ length: 12 }, (_, i) => {
       const m = trendMap[i + 1]
       return {
-        name:        MONTH_ABBR[i],
-        Ingresos:    m?.income      ?? 0,
-        Gastos:      m?.expenses    ?? 0,
-        Inversiones: m?.investments ?? 0,
+        name:      MONTH_ABBR[i],
+        Ingresos:  m?.income   ?? 0,
+        Egresos:   m?.expenses ?? 0,
       }
     })
   }, [data])
@@ -68,18 +75,27 @@ export default function Annual() {
   const kpis = data?.kpis ?? {}
   const netSavings = (kpis.income_ytd ?? 0) - (kpis.expenses_ytd ?? 0) - (kpis.investments_ytd ?? 0)
 
-  function yAxisFormatter(v) {
-    if (v === 0) return '0'
-    if (Math.abs(v) >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
-    return `$${(v / 1_000).toFixed(0)}k`
-  }
+  const months = data?.monthly_trend ?? []
+  const bestMonth = months.reduce(
+    (best, m) => (m.balance > (best?.balance ?? -Infinity) ? m : best),
+    null
+  )
+  const worstMonth = months.filter(m => m.expenses > 0).reduce(
+    (worst, m) => (m.expenses > (worst?.expenses ?? -Infinity) ? m : worst),
+    null
+  )
+
+  const top10 = (data?.top_expenses ?? []).slice(0, 10)
+  const installments = data?.active_installments ?? []
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
-
+    <div className="p-6 max-w-5xl">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <h2 className="text-xl font-bold text-white">Resumen Anual</h2>
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Vista Anual</h1>
+          <p className="text-white/35 text-sm mt-0.5">Resumen, proyecciones e insights</p>
+        </div>
         <select
           value={year}
           onChange={e => setYear(Number(e.target.value))}
@@ -89,126 +105,148 @@ export default function Annual() {
         </select>
       </div>
 
-      {loading && <Spinner />}
-      {error && <div className="text-center py-16 text-white/50">{error}</div>}
-
-      {!loading && !error && data && (
+      {loading ? <Spinner /> : (
         <>
-          {/* Primary KPIs */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <KpiCard
-              title="Ingresos"
-              value={formatCLP(kpis.income_ytd ?? 0)}
-              color="text-emerald-400"
-            />
-            <KpiCard
-              title="Gastos"
-              value={formatCLP(kpis.expenses_ytd ?? 0)}
-              color="text-rose-400"
-            />
-            <KpiCard
-              title="Invertido"
-              value={formatCLP(kpis.investments_ytd ?? 0)}
-              color="text-cyan-400"
-            />
-            <KpiCard
-              title="Ahorro neto"
-              value={formatCLP(netSavings)}
-              color={netSavings >= 0 ? 'text-violet-300' : 'text-rose-400'}
-            />
-          </div>
-
-          {/* Secondary KPIs */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <KpiCard
-              title="Patrimonio neto"
-              value={formatCLP(kpis.net_worth ?? 0)}
-              color="text-violet-300"
-            />
-            <KpiCard
-              title="Cash balance"
-              value={formatCLP(kpis.cash_balance ?? 0)}
-              color={(kpis.cash_balance ?? 0) >= 0 ? 'text-emerald-300' : 'text-rose-400'}
-            />
-            <KpiCard
-              title="Tasa inversión"
-              value={formatPct(kpis.investment_rate ?? 0)}
-              color="text-cyan-300"
-            />
-            <KpiCard
-              title="Cost of living"
-              value={formatPct(kpis.cost_of_living ?? 0)}
-              color={(kpis.cost_of_living ?? 0) > 0.9 ? 'text-rose-400' : (kpis.cost_of_living ?? 0) > 0.7 ? 'text-amber-300' : 'text-emerald-300'}
-            />
-          </div>
-
-          {/* Monthly trend chart */}
-          <div className="glass rounded-2xl p-4 sm:p-6">
-            <h3 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-4">
-              Tendencia mensual
-            </h3>
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={chartData} margin={{ top: 4, right: 8, left: 8, bottom: 0 }} barCategoryGap="22%">
-                <XAxis
-                  dataKey="name"
-                  tick={{ fontSize: 11, fill: 'rgba(255,255,255,0.4)' }}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  tickFormatter={yAxisFormatter}
-                  tick={{ fontSize: 11, fill: 'rgba(255,255,255,0.35)' }}
-                  tickLine={false}
-                  axisLine={false}
-                  width={52}
-                />
-                <Tooltip content={<AnnualTooltip />} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
-                <Legend
-                  wrapperStyle={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', paddingTop: '12px' }}
-                />
-                <Bar dataKey="Ingresos"    fill="#34d399" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="Gastos"      fill="#f43f5e" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="Inversiones" fill="#22d3ee" radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Category breakdown */}
-          <div className="glass rounded-2xl p-4 sm:p-6">
-            <h3 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-4">
-              Gastos por categoría
-            </h3>
-
-            {data.category_totals.length === 0 ? (
-              <p className="text-center py-8 text-white/30 text-sm">Sin datos para este año</p>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {data.category_totals.map(cat => {
-                  const colors = CATEGORY_COLORS[cat.category] ?? FALLBACK_COLOR
-                  const isNavigable = cat.category !== 'Sin categoría'
-                  return (
-                    <div
-                      key={cat.category}
-                      onClick={isNavigable ? () => navigate(`/ledger?category=${cat.category}&year=${year}`) : undefined}
-                      className={`${colors.bg} rounded-xl p-4 flex items-center gap-3 ${isNavigable ? 'cursor-pointer hover:brightness-110 transition-all' : ''}`}
-                    >
-                      <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${colors.dot}`} />
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-xs font-semibold uppercase tracking-wide ${colors.text}`}>
-                          {cat.category}
-                        </p>
-                        <p className="text-white text-base font-bold mt-0.5 leading-tight">
-                          {formatCLP(cat.total)}
-                        </p>
-                      </div>
-                      <p className="text-xs text-white/35 flex-shrink-0">
-                        {cat.transactions} mov.
-                      </p>
-                    </div>
-                  )
-                })}
+          {/* KPI row */}
+          <div className="grid grid-cols-4 gap-3 mb-5">
+            {[
+              { label: `Ingresos ${year}`,  value: formatCLP(kpis.income_ytd ?? 0),     color: 'text-emerald-400' },
+              { label: `Egresos ${year}`,   value: formatCLP(kpis.expenses_ytd ?? 0),   color: 'text-rose-400'    },
+              { label: 'Inversiones',        value: formatCLP(kpis.investments_ytd ?? 0), color: 'text-cyan-400'   },
+              { label: 'Balance neto',       value: formatCLP(netSavings),                color: netSavings >= 0 ? 'text-violet-300' : 'text-rose-400' },
+            ].map(k => (
+              <div key={k.label} className="glass rounded-xl p-4">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-white/30 mb-1">{k.label}</p>
+                <p className={`text-lg font-bold tabular ${k.color}`}>{k.value}</p>
               </div>
-            )}
+            ))}
+          </div>
+
+          {/* Main two columns */}
+          <div className="grid grid-cols-2 gap-4">
+            {/* Left: chart */}
+            <div className="glass rounded-2xl p-5">
+              <p className="text-[11px] font-semibold text-white/35 uppercase tracking-wider mb-4">
+                Ingresos vs Egresos — {year}
+              </p>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barCategoryGap="20%">
+                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.3)' }} tickLine={false} axisLine={false} />
+                  <YAxis tickFormatter={yFmt} tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.25)' }} tickLine={false} axisLine={false} width={44} />
+                  <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                  <Legend wrapperStyle={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', paddingTop: 8 }} />
+                  <Bar dataKey="Ingresos" fill="#34d399" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="Egresos"  fill="#f43f5e" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Right column */}
+            <div className="flex flex-col gap-4">
+              {/* Top 10 expenses */}
+              <div className="glass rounded-2xl p-5">
+                <p className="text-[11px] font-semibold text-white/35 uppercase tracking-wider mb-3">
+                  Top 10 gastos del año
+                </p>
+                {top10.length === 0 ? (
+                  <p className="text-center py-4 text-white/25 text-sm">Sin datos</p>
+                ) : (
+                  <div className="space-y-2">
+                    {top10.map((tx, i) => {
+                      const colors = CATEGORY_COLORS[tx.category] ?? FALLBACK_COLORS
+                      return (
+                        <div key={tx.id ?? i} className="flex items-center gap-2.5">
+                          <span className="text-white/20 text-[10px] w-4 text-right flex-shrink-0">{i + 1}</span>
+                          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${colors.dot}`} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs text-white/70 truncate leading-tight">{tx.description}</p>
+                            <p className="text-[10px] text-white/30 uppercase leading-tight">{tx.category}</p>
+                          </div>
+                          <span className="text-xs font-semibold text-rose-400 tabular flex-shrink-0">
+                            -{formatCLP(tx.amount)}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Insights */}
+              <div className="glass rounded-2xl p-5">
+                <p className="text-[11px] font-semibold text-white/35 uppercase tracking-wider mb-2">
+                  Insights económicos
+                </p>
+                <InsightRow
+                  icon="📊"
+                  label="Tasa de ahorro"
+                  value={formatPct(kpis.investment_rate ?? 0)}
+                  valueColor={(kpis.investment_rate ?? 0) >= 0.1 ? 'text-emerald-400' : 'text-rose-400'}
+                />
+                <InsightRow
+                  icon="🏠"
+                  label="Costo de vida / Ingresos"
+                  value={formatPct(kpis.cost_of_living ?? 0)}
+                  valueColor={(kpis.cost_of_living ?? 0) <= 0.7 ? 'text-emerald-400' : (kpis.cost_of_living ?? 0) <= 0.9 ? 'text-amber-400' : 'text-rose-400'}
+                />
+                <InsightRow
+                  icon="📈"
+                  label="% Invertido"
+                  value={formatPct(kpis.investment_rate ?? 0)}
+                  valueColor="text-cyan-400"
+                />
+                <InsightRow
+                  icon="⬆"
+                  label="Mejor mes"
+                  value={bestMonth ? MONTH_ABBR[(bestMonth.month ?? 1) - 1] : '—'}
+                  valueColor="text-emerald-400"
+                />
+                <InsightRow
+                  icon="⬇"
+                  label="Mes más caro"
+                  value={worstMonth ? MONTH_ABBR[(worstMonth.month ?? 1) - 1] : '—'}
+                  valueColor="text-rose-400"
+                />
+                <InsightRow
+                  icon="🔮"
+                  label={`Proyección ${year}`}
+                  value={formatCLP(data?.projection ?? 0)}
+                  valueColor="text-violet-300"
+                />
+              </div>
+
+              {/* Active installments */}
+              {installments.length > 0 && (
+                <div className="glass rounded-2xl p-5">
+                  <p className="text-[11px] font-semibold text-white/35 uppercase tracking-wider mb-3">
+                    Cuotas de tarjeta activas
+                  </p>
+                  <div className="space-y-2">
+                    {installments.map((item, i) => (
+                      <div key={i} className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs text-white/65 truncate">{item.description}</p>
+                          <p className="text-[10px] text-white/30">
+                            {item.installment_current}/{item.installment_total} cuotas
+                          </p>
+                        </div>
+                        <span className="text-xs font-semibold text-rose-400 tabular">{formatCLP(item.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {installments.length === 0 && (
+                <div className="glass rounded-2xl p-5">
+                  <p className="text-[11px] font-semibold text-white/35 uppercase tracking-wider mb-2">
+                    Cuotas de tarjeta activas
+                  </p>
+                  <p className="text-xs text-white/25 py-2">
+                    Sin cuotas activas. Al agregar movimientos con cuotas aparecerán aquí.
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         </>
       )}

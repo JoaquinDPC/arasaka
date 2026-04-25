@@ -47,6 +47,7 @@ export const api = {
   trend:          (year)        => get(`/reports/trend?year=${year}`),
   annual:         (year)        => get(`/reports/annual?year=${year}`),
   budgetVsActual: (month, year) => get(`/reports/budget-vs-actual?month=${month}&year=${year}`),
+  categorySummary:(params = {}) => get(`/categories/summary${qs(params)}`),
 
   // Insights
   insights: (month, year) => get(`/insights?month=${month}&year=${year}`),
@@ -57,12 +58,16 @@ export const api = {
   updateTransaction: (id, body)    => put(`/transactions/${id}`, body),
   deleteTransaction: (id)          => del(`/transactions/${id}`),
 
-  // Budgets
-  budgets:      (year) => get(`/budgets?year=${year}`),
-  upsertBudget: (body) => put('/budgets', body),
+  // Accounts
+  accounts:      ()          => get('/accounts'),
+  createAccount: (body)      => post('/accounts', body),
+  updateAccount: (id, body)  => put(`/accounts/${id}`, body),
+  deleteAccount: (id)        => del(`/accounts/${id}`),
 
-  // Import
-  importBank: () => post('/import/bank', {}),
+  // Budgets
+  budgets:           (year) => get(`/budgets?year=${year}`),
+  upsertBudget:      (body) => put('/budgets', body),
+  upsertBudgetsBase: (body) => put('/budgets/base', body),
 
   // Sync
   sync: () => post('/sync', {}),

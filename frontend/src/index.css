@@ -2,51 +2,62 @@
 
 @layer base {
   body {
-    background: linear-gradient(135deg, #0f0720 0%, #180a38 45%, #0c1a3e 100%);
-    background-attachment: fixed;
+    background-color: #0c0c14;
     min-height: 100vh;
     color: white;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+  * {
+    box-sizing: border-box;
+  }
 }
 
 @layer utilities {
   .glass {
-    background: rgba(255, 255, 255, 0.07);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.13);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.09);
   }
   .glass-strong {
-    background: rgba(255, 255, 255, 0.11);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.13);
   }
   .glass-nav {
-    background: rgba(10, 6, 24, 0.8);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(10, 10, 18, 0.95);
+    border-right: 1px solid rgba(255, 255, 255, 0.07);
   }
   .glass-input {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     color: white;
     color-scheme: dark;
     transition: border-color 0.15s ease, background-color 0.15s ease;
   }
   .glass-input:focus {
     outline: none;
-    border-color: rgba(255, 255, 255, 0.4);
-    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(139, 92, 246, 0.5);
+    background: rgba(255, 255, 255, 0.09);
   }
   .glass-input::placeholder {
-    color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.25);
   }
   .glass-input option {
-    background: #180a38;
+    background: #111118;
     color: white;
   }
+  .sidebar {
+    width: 168px;
+    min-width: 168px;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: #0a0a10;
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+    position: sticky;
+    top: 0;
+    overflow: hidden;
+  }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  .tabular { font-variant-numeric: tabular-nums; }
 }
