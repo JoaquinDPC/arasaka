@@ -1,92 +1,100 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect, useMemo } from 'react'
 import { api } from '../api/client'
-import { formatCLP, monthName } from '../lib/formatters'
-import { CATEGORY_COLORS } from '../lib/constants'
+import { formatCLP, formatDate } from '../lib/formatters'
+import { getCatColor, CATEGORIES, MONTHS } from '../lib/constants'
 import Spinner from '../components/Spinner'
 
-const CATEGORY_BAR_COLORS = {
-  Personal:      '#8b5cf6',
-  Casa:          '#eab308',
-  Otros:         '#64748b',
-  Salud:         '#22c55e',
-  Transporte:    '#f59e0b',
-  Suscripciones: '#6366f1',
-  Gustos:        '#ec4899',
-  Mascota:       '#f97316',
-  Inversion:     '#06b6d4',
-  Patrimonio:    '#94a3b8',
+function fmtDate(ds) {
+  const d = new Date(ds + 'T12:00')
+  const today = new Date()
+  const diff = Math.floor((today - d) / 86400000)
+  if (diff === 0) return 'Hoy'
+  if (diff === 1) return 'Ayer'
+  return formatDate(ds)
 }
 
-function BudgetBattery({ category, spent, budget }) {
-  const pct = budget > 0 ? Math.min(spent / budget, 1) : 0
-  const barColor = CATEGORY_BAR_COLORS[category] ?? '#64748b'
-  const pctDisplay = budget > 0 ? Math.round(pct * 100) : 0
-  const shortLabel = category.slice(0, 6).toUpperCase()
-  const spentK = spent >= 1000 ? `${Math.round(spent / 1000)}k` : String(spent)
-  const budgetK = budget >= 1000 ? `${Math.round(budget / 1000)}k` : String(budget)
+function groupByDate(txs) {
+  const groups = []
+  let cur = null
+  ;[...txs].forEach(tx => {
+    const date = tx.date?.slice(0, 10) ?? ''
+    if (date !== cur) { cur = date; groups.push({ date, items: [] }) }
+    groups[groups.length - 1].items.push(tx)
+  })
+  return groups
+}
+
+function BudgetRow({ cat, spent, budget }) {
+  const color = getCatColor(cat)
+  const over = budget > 0 && spent > budget
+  const pct = budget > 0 ? Math.min(spent / budget * 100, 100) : 0
+  const barColor = over ? 'var(--red)' : pct > 80 ? '#d4884c' : color
 
   return (
-    <div className="flex flex-col items-center gap-1.5" style={{ width: 60 }}>
-      <span className="text-white/70 text-[11px] font-semibold tabular">{spentK}</span>
-      <div
-        className="relative rounded-xl border-2 overflow-hidden"
-        style={{
-          width: 40,
-          height: 100,
-          borderColor: `${barColor}40`,
-          borderStyle: pct < 1 ? 'dashed' : 'solid',
-        }}
-      >
-        <div
-          className="absolute bottom-0 left-0 right-0 rounded-b-lg transition-all"
-          style={{
-            height: `${Math.max(pct * 100, 2)}%`,
-            background: barColor,
-            opacity: 0.85,
-          }}
-        />
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-white text-[10px] font-bold">{pctDisplay}%</span>
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.05em' }}>{cat.toUpperCase()}</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {budget > 0 && (
+            <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: over ? 'var(--red)' : 'var(--text-dim)' }}>
+              {over ? `+${formatCLP(spent - budget)}` : `${Math.round(pct)}%`}
+            </span>
+          )}
+          <span style={{ fontSize: 12, fontFamily: 'var(--mono)', fontWeight: 600, color: over ? 'var(--red)' : color }}>
+            {formatCLP(spent)}
+          </span>
         </div>
       </div>
-      <div className="text-center">
-        <p className="text-white/50 text-[10px] leading-tight">{shortLabel}.</p>
-        <p className="text-white/25 text-[10px] leading-tight">{budgetK}</p>
+      <div style={{ height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: budget > 0 ? `${pct}%` : '100%', background: budget > 0 ? barColor : color + '40', borderRadius: 2, transition: 'width .4s ease' }} />
       </div>
+      {budget > 0 && (
+        <div style={{ textAlign: 'right', fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--mono)', marginTop: 3 }}>
+          límite {formatCLP(budget)}
+        </div>
+      )}
     </div>
   )
 }
 
-function CategoryDot({ category }) {
-  const colors = CATEGORY_COLORS[category]
-  if (!colors) return <span className="w-2 h-2 rounded-full bg-slate-400 flex-shrink-0" />
-  return <span className={`w-2 h-2 rounded-full flex-shrink-0 ${colors.dot}`} />
-}
-
-function formatDateLabel(dateStr) {
-  if (!dateStr) return ''
-  const d = new Date(dateStr)
-  const today = new Date()
-  const diffMs = today.setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)
-  const diffDays = Math.round(diffMs / 86400000)
-  if (diffDays === 0) return 'HOY'
-  if (diffDays === 1) return 'AYER'
-  return d.toLocaleDateString('es-CL', { day: '2-digit', month: 'short' }).toUpperCase()
-}
-
-function groupByDay(transactions) {
-  const groups = []
-  const seen = {}
-  for (const tx of transactions) {
-    const key = tx.date?.slice(0, 10) ?? ''
-    if (!seen[key]) {
-      seen[key] = true
-      groups.push({ key, label: formatDateLabel(tx.date), transactions: [] })
-    }
-    groups[groups.length - 1].transactions.push(tx)
-  }
-  return groups
+function MovDetail({ tx, onClose }) {
+  const tags = (tx.tags?.length ? tx.tags : (tx.category ? [tx.category] : [])).filter(t => CATEGORIES.includes(t))
+  return (
+    <div className="overlay fade" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ width: 420 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+          <div style={{ width: 10, height: 10, borderRadius: '50%', background: getCatColor(tx.category), flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 16, fontWeight: 600 }}>{tx.description}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{formatDate(tx.date)}</div>
+          </div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 18, fontWeight: 600, color: tx.flow === 'INCOME' ? 'var(--green)' : 'var(--red)' }}>
+            {tx.flow === 'INCOME' ? '+' : '-'}{formatCLP(tx.amount)}
+          </div>
+        </div>
+        {tags.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
+            {tags.map(t => (
+              <span key={t} style={{ fontSize: 11, padding: '3px 9px', background: getCatColor(t) + '22', color: getCatColor(t), borderRadius: 5, fontWeight: 700 }}>
+                {t}
+              </span>
+            ))}
+          </div>
+        )}
+        {tx.notes && (
+          <div style={{ marginBottom: 12, fontSize: 13, lineHeight: 1.5, color: 'var(--text)', background: 'var(--surface2)', padding: '10px 12px', borderRadius: 7, border: '1px solid var(--border)' }}>
+            {tx.notes}
+          </div>
+        )}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+          <button className="btn-ghost" onClick={onClose}>Cerrar</button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function Home() {
@@ -94,26 +102,23 @@ export default function Home() {
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [year, setYear]   = useState(now.getFullYear())
 
-  const [monthly, setMonthly]   = useState(null)
-  const [kpis, setKpis]         = useState(null)
-  const [budgets, setBudgets]   = useState([])
-  const [recent, setRecent]     = useState([])
-  const [loading, setLoading]   = useState(true)
-  const navigate = useNavigate()
+  const [kpis, setKpis]       = useState(null)
+  const [budgets, setBudgets] = useState([])
+  const [recent, setRecent]   = useState([])
+  const [loading, setLoading] = useState(true)
+  const [selTx, setSelTx]     = useState(null)
 
   useEffect(() => {
     setLoading(true)
     Promise.all([
-      api.monthly(month, year),
       api.kpis(year),
       api.budgetVsActual(month, year),
-      api.transactions({ month, year, limit: 15 }),
+      api.transactions({ month, year, limit: 30 }),
     ])
-      .then(([mon, kpiData, budgetData, txData]) => {
-        setMonthly(mon)
+      .then(([kpiData, budgetData, txData]) => {
         setKpis(kpiData)
         const cats = Array.isArray(budgetData) ? budgetData : (budgetData?.categories ?? [])
-        setBudgets(cats.filter(c => c.budget > 0 || c.total > 0))
+        setBudgets(cats)
         setRecent(Array.isArray(txData) ? txData : (txData?.transactions ?? []))
       })
       .catch(() => {})
@@ -129,135 +134,146 @@ export default function Home() {
     else setMonth(m => m + 1)
   }
 
-  const netWorth  = kpis?.net_worth ?? 0
-  const income    = monthly?.income ?? 0
-  const expenses  = monthly?.expenses ?? 0
-  const balance   = monthly?.balance ?? 0
-  const groups    = groupByDay(recent.slice(0, 12))
+  const netWorth   = kpis?.net_worth ?? 0
+  const incomeYtd  = kpis?.income_ytd ?? 0
+  const expensesYtd = kpis?.expenses_ytd ?? 0
+  const investYtd  = kpis?.investments_ytd ?? 0
+  const pctInv     = incomeYtd > 0 ? +(investYtd / incomeYtd * 100).toFixed(1) : 0
 
-  const budgetBars = budgets.filter(b => b.budget > 0).slice(0, 5)
+  const topBudgets = useMemo(() =>
+    budgets
+      .filter(b => !['Sueldo', 'Devolucion'].includes(b.category) && (b.total > 0 || b.budget > 0))
+      .sort((a, b) => (b.total ?? 0) - (a.total ?? 0))
+      .slice(0, 6)
+  , [budgets])
+
+  const grouped = useMemo(() => groupByDate(recent), [recent])
 
   return (
-    <div className="p-6 max-w-4xl">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Home</h1>
-          <p className="text-white/35 text-sm mt-0.5">Resumen + presupuestos</p>
+    <div className="fade">
+      {/* ── HERO ── */}
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', fontWeight: 700, marginBottom: 6 }}>
+          Patrimonio total
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={prevMonth}
-            className="w-7 h-7 flex items-center justify-center rounded-lg glass text-white/40 hover:text-white transition-colors text-base leading-none"
-          >
-            ‹
-          </button>
-          <span className="text-white/70 text-sm font-medium min-w-[90px] text-center">
-            {monthName(month)} {year}
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 'clamp(32px,6vw,48px)', fontWeight: 700, letterSpacing: '-0.02em', color: netWorth >= 0 ? 'var(--accent)' : 'var(--red)', lineHeight: 1 }}>
+          {formatCLP(netWorth)}
+        </div>
+      </div>
+
+      {/* ── ANNUAL STATS ── */}
+      <div className="stats" style={{ marginBottom: 20 }}>
+        <div className="stat">
+          <div className="stat-lbl">Entradas {year}</div>
+          <div className="stat-val" style={{ color: 'var(--green)', fontSize: 17 }}>{formatCLP(incomeYtd)}</div>
+        </div>
+        <div className="stat">
+          <div className="stat-lbl">Salidas {year}</div>
+          <div className="stat-val" style={{ color: 'var(--red)', fontSize: 17 }}>{formatCLP(expensesYtd)}</div>
+        </div>
+        <div className="stat">
+          <div className="stat-lbl">Inversión {year}</div>
+          <div className="stat-val" style={{ color: '#4cb8af', fontSize: 17 }}>{formatCLP(investYtd)}</div>
+          <div className="stat-delta"><span style={{ color: '#4cb8af', fontWeight: 700 }}>{pctInv}%</span> de ingresos</div>
+        </div>
+        <div className="stat" style={{ borderColor: 'rgba(201,168,76,.25)' }}>
+          <div className="stat-lbl">Balance neto</div>
+          <div className="stat-val" style={{ color: incomeYtd - expensesYtd >= 0 ? 'var(--accent)' : 'var(--red)', fontSize: 17 }}>
+            {formatCLP(incomeYtd - expensesYtd)}
+          </div>
+        </div>
+      </div>
+
+      {/* ── MONTH NAV ── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+          Detalle mensual
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button className="nav-arrow" onClick={prevMonth}>‹</button>
+          <span style={{ fontSize: 13, fontWeight: 600, minWidth: 120, textAlign: 'center' }}>
+            {MONTHS[month - 1]} {year}
           </span>
-          <button
-            onClick={nextMonth}
-            className="w-7 h-7 flex items-center justify-center rounded-lg glass text-white/40 hover:text-white transition-colors text-base leading-none"
-          >
-            ›
-          </button>
+          <button className="nav-arrow" onClick={nextMonth}>›</button>
         </div>
       </div>
 
       {loading ? <Spinner /> : (
-        <>
-          {/* Balance hero */}
-          <div className="mb-5">
-            <p className="text-white/35 text-[11px] font-semibold uppercase tracking-widest mb-1">
-              Saldo actual
-            </p>
-            <p className="text-4xl font-bold text-violet-300 tabular mb-2">
-              {formatCLP(netWorth)}
-            </p>
-            <div className="flex items-center gap-4 text-sm">
-              <span className="text-emerald-400 tabular">+{formatCLP(income)} ingresos</span>
-              <span className="text-rose-400 tabular">-{formatCLP(expenses)} egresos</span>
-              <span className={`tabular ${balance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {formatCLP(balance)} balance caja
-              </span>
+        /* ── TWO-COLUMN: budget bars + movements ── */
+        <div className="home-grid">
+          {/* Budget bars */}
+          <div className="card" style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div className="card-title" style={{ marginBottom: 0 }}>Top gastos</div>
+              <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>{MONTHS[month - 1]}</span>
             </div>
-          </div>
-
-          {/* Budget batteries */}
-          {budgetBars.length > 0 && (
-            <div className="glass rounded-2xl p-5 mb-4">
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-[11px] font-semibold text-white/35 uppercase tracking-wider">
-                  Presupuesto — {monthName(month)}
-                </span>
-                <span className="text-[11px] text-white/20">Arrastra ↕ para ajustar presupuesto</span>
-              </div>
-              <div className="flex items-end gap-4">
-                {budgetBars.map(b => (
-                  <BudgetBattery
-                    key={b.category}
-                    category={b.category}
-                    spent={b.total ?? 0}
-                    budget={b.budget ?? 0}
-                  />
+            {topBudgets.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {topBudgets.map(b => (
+                  <BudgetRow key={b.category} cat={b.category} spent={b.total ?? 0} budget={b.budget ?? 0} />
                 ))}
               </div>
-            </div>
-          )}
-
-          {/* Recent transactions */}
-          <div className="glass rounded-2xl p-5">
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-[11px] font-semibold text-white/35 uppercase tracking-wider">
-                Movimientos recientes
-              </span>
-              <button
-                onClick={() => navigate('/movimientos')}
-                className="text-[11px] text-violet-400 hover:text-violet-300 transition-colors"
-              >
-                Ver todos →
-              </button>
-            </div>
-
-            {groups.length === 0 && (
-              <p className="text-center py-8 text-white/25 text-sm">
-                Sin movimientos este mes
-              </p>
+            ) : (
+              <div className="empty-msg" style={{ padding: '32px 0' }}>Sin movimientos este mes</div>
             )}
-
-            {groups.map(group => (
-              <div key={group.key} className="mb-4 last:mb-0">
-                <p className="text-[10px] font-semibold text-white/25 uppercase tracking-wider mb-2">
-                  {group.label}
-                </p>
-                <div className="space-y-1">
-                  {group.transactions.map(tx => (
-                    <div
-                      key={tx.id}
-                      className="flex items-center gap-3 py-2 rounded-xl hover:bg-white/5 transition-colors px-2 -mx-2 cursor-pointer"
-                      onClick={() => navigate('/movimientos')}
-                    >
-                      <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
-                        style={{ background: `${CATEGORY_BAR_COLORS[tx.category] ?? '#64748b'}22` }}>
-                        <CategoryDot category={tx.category} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-white/80 truncate leading-tight">{tx.description}</p>
-                        <p className="text-[11px] text-white/30 uppercase tracking-wide leading-tight">{tx.category}</p>
-                      </div>
-                      <span className={`text-sm font-semibold tabular flex-shrink-0 ${
-                        tx.flow === 'INCOME' ? 'text-emerald-400' : 'text-rose-400'
-                      }`}>
-                        {tx.flow === 'INCOME' ? '+' : '-'}{formatCLP(tx.amount)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
           </div>
-        </>
+
+          {/* Monthly movements */}
+          <div className="card" style={{ minWidth: 0, maxHeight: 560, overflowY: 'auto' }}>
+            <div className="card-title">Movimientos — {MONTHS[month - 1]}</div>
+            {grouped.length > 0 ? (
+              grouped.map(g => (
+                <div key={g.date} style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 6, paddingBottom: 5, borderBottom: '1px solid var(--border)' }}>
+                    {fmtDate(g.date)}
+                  </div>
+                  {g.items.map(tx => {
+                    const color = getCatColor(tx.category)
+                    const tags = (tx.tags?.length ? tx.tags : (tx.category ? [tx.category] : [])).filter(t => CATEGORIES.includes(t))
+                    return (
+                      <div
+                        key={tx.id}
+                        onClick={() => setSelTx(tx)}
+                        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 6px', borderRadius: 7, cursor: 'pointer', transition: 'background var(--t)' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <div style={{ width: 32, height: 32, borderRadius: 7, background: color + '22', border: `1px solid ${color}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <div style={{ width: 7, height: 7, borderRadius: '50%', background: color }} />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tx.description}</div>
+                          <div style={{ display: 'flex', gap: 5, marginTop: 2, flexWrap: 'wrap' }}>
+                            {tags.slice(0, 3).map(t => (
+                              <span key={t} style={{ fontSize: 9, padding: '1px 6px', background: getCatColor(t) + '22', color: getCatColor(t), borderRadius: 3, fontWeight: 700 }}>
+                                {t}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                          <div style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600, color: tx.flow === 'INCOME' ? 'var(--green)' : 'var(--red)' }}>
+                            {tx.flow === 'INCOME' ? '+' : '-'}{formatCLP(tx.amount)}
+                          </div>
+                          {tx.running_balance != null && (
+                            <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--mono)' }}>
+                              {formatCLP(tx.running_balance)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ))
+            ) : (
+              <div className="empty-msg">Sin movimientos en {MONTHS[month - 1]}</div>
+            )}
+          </div>
+        </div>
       )}
+
+      {selTx && <MovDetail tx={selTx} onClose={() => setSelTx(null)} />}
     </div>
   )
 }

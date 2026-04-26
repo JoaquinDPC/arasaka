@@ -1,26 +1,68 @@
-export const CATEGORY_COLORS = {
-  Casa:          { bg: 'bg-blue-500/15',    text: 'text-blue-300',    dot: 'bg-blue-400'    },
-  Personal:      { bg: 'bg-purple-500/15',  text: 'text-purple-300',  dot: 'bg-purple-400'  },
-  Salud:         { bg: 'bg-green-500/15',   text: 'text-green-300',   dot: 'bg-green-400'   },
-  Transporte:    { bg: 'bg-yellow-500/15',  text: 'text-yellow-300',  dot: 'bg-yellow-400'  },
-  Suscripciones: { bg: 'bg-indigo-500/15',  text: 'text-indigo-300',  dot: 'bg-indigo-400'  },
-  Gustos:        { bg: 'bg-pink-500/15',    text: 'text-pink-300',    dot: 'bg-pink-400'    },
-  Mascota:       { bg: 'bg-orange-500/15',  text: 'text-orange-300',  dot: 'bg-orange-400'  },
-  Otros:         { bg: 'bg-slate-500/15',   text: 'text-slate-300',   dot: 'bg-slate-400'   },
-  Regalo:        { bg: 'bg-rose-500/15',    text: 'text-rose-300',    dot: 'bg-rose-400'    },
-  Seguros:       { bg: 'bg-sky-500/15',     text: 'text-sky-300',     dot: 'bg-sky-400'     },
-  Vacaciones:    { bg: 'bg-teal-500/15',    text: 'text-teal-300',    dot: 'bg-teal-400'    },
-  Sueldo:        { bg: 'bg-emerald-500/15', text: 'text-emerald-300', dot: 'bg-emerald-400' },
-  Devolucion:    { bg: 'bg-teal-500/15',    text: 'text-teal-300',    dot: 'bg-teal-400'    },
-  Inversion:     { bg: 'bg-cyan-500/15',    text: 'text-cyan-300',    dot: 'bg-cyan-400'    },
-  Patrimonio:    { bg: 'bg-slate-500/15',   text: 'text-slate-300',   dot: 'bg-slate-500'   },
+export const CAT_COLORS = {
+  Casa:          '#c9a84c',
+  Personal:      '#9b7fd4',
+  Salud:         '#4caf7d',
+  Inversion:     '#4cb8af',
+  Patrimonio:    '#af4c8a',
+  Transporte:    '#d4884c',
+  Suscripciones: '#80af4c',
+  Gustos:        '#e07c5c',
+  Otros:         '#888888',
+  Sueldo:        '#50b87a',
+  Devolucion:    '#4cb8af',
+  Mascota:       '#c9784c',
+  Regalo:        '#c94c8a',
+  Seguros:       '#7c9faf',
+  Vacaciones:    '#afb04c',
 }
 
-export const CATEGORIES = Object.keys(CATEGORY_COLORS)
+export const CATEGORIES = Object.keys(CAT_COLORS)
+
+export function getCatColor(cat) {
+  if (!cat) return '#888888'
+  if (CAT_COLORS[cat]) return CAT_COLORS[cat]
+  let hash = 0
+  for (let i = 0; i < cat.length; i++) {
+    hash = cat.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  return `hsl(${Math.abs(hash) % 360}, 52%, 54%)`
+}
+
+// Backward compat alias used by some components
+export const CATEGORY_COLORS = Object.fromEntries(
+  Object.entries(CAT_COLORS).map(([k, hex]) => [
+    k,
+    { hex, dot: hex, text: hex, bg: hex + '22' },
+  ])
+)
 
 export const FLOW_TYPES = [
   { value: 'INCOME',  label: 'Ingresos'     },
   { value: 'EXPENSE', label: 'Gastos'        },
   { value: 'INVEST',  label: 'Inversiones'   },
   { value: 'OPENING', label: 'Saldo inicial' },
+]
+
+export const LIFE_CATS    = ['Casa', 'Personal', 'Salud', 'Transporte', 'Suscripciones', 'Mascota', 'Seguros', 'Otros']
+export const INV_CATS     = ['Inversion', 'Patrimonio']
+export const INCOME_CATS  = ['Sueldo', 'Devolucion']
+
+export const MONTHS = [
+  'Enero','Febrero','Marzo','Abril','Mayo','Junio',
+  'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre',
+]
+
+export const MONTH_ABBR = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+
+export const BANKS = [
+  'BCI','Banco de Chile','Santander','BancoEstado','Scotiabank',
+  'Itaú','BICE','Falabella','Ripley','Mercado Pago','Otro',
+]
+export const ACCT_TYPES = [
+  'Cuenta corriente','Cuenta de ahorro','Tarjeta de crédito',
+  'Cuenta vista','Inversión','Otro',
+]
+export const ACCT_COLORS = [
+  '#c9a84c','#4cb8af','#9b7fd4','#e07c5c','#4caf7d',
+  '#d4884c','#c94c8a','#7c9faf','#afb04c',
 ]

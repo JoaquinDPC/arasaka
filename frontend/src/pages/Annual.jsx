@@ -1,46 +1,41 @@
 import { useState, useEffect, useMemo } from 'react'
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
-} from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { api } from '../api/client'
-import { formatCLP, formatPct } from '../lib/formatters'
-import { CATEGORY_COLORS } from '../lib/constants'
+import { formatCLP } from '../lib/formatters'
+import { getCatColor, MONTH_ABBR } from '../lib/constants'
 import Spinner from '../components/Spinner'
 
-const YEARS = [2024, 2025, 2026]
-const MONTH_ABBR = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
-const FALLBACK_COLORS = { dot: 'bg-slate-400', text: 'text-slate-300' }
-
-function ChartTooltip({ active, payload, label }) {
-  if (!active || !payload?.length) return null
+function InsightRow({ icon, label, value, sub, good }) {
   return (
-    <div style={{ background: '#111118', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '0.75rem', padding: '0.75rem', fontSize: '0.8125rem' }}>
-      <p className="font-semibold text-white mb-1.5">{label}</p>
-      {payload.map(p => (
-        <p key={p.dataKey} style={{ color: p.fill }} className="leading-snug">
-          {p.name}: {formatCLP(p.value)}
-        </p>
-      ))}
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)' }}>
+      <span style={{ fontSize: 15, width: 22, textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>{icon}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>{label}</div>
+        <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 1 }}>{sub}</div>
+      </div>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600, color: good ? 'var(--green)' : 'var(--red)', whiteSpace: 'nowrap' }}>
+        {value}
+      </div>
     </div>
   )
 }
 
-function yFmt(v) {
-  if (!v) return '0'
-  if (Math.abs(v) >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
-  return `$${(v / 1_000).toFixed(0)}k`
-}
-
-function InsightRow({ icon, label, value, valueColor = 'text-white/80' }) {
+function ChartTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  const income   = payload.find(p => p.dataKey === 'Ingresos')?.value ?? 0
+  const expenses = payload.find(p => p.dataKey === 'Egresos')?.value ?? 0
+  const savings  = income - expenses
   return (
-    <div className="flex items-center justify-between py-2.5 border-b border-white/5 last:border-0">
-      <div className="flex items-center gap-2.5">
-        <span className="text-base">{icon}</span>
-        <div>
-          <p className="text-xs font-medium text-white/60">{label}</p>
-        </div>
-      </div>
-      <span className={`text-sm font-bold tabular ${valueColor}`}>{value}</span>
+    <div style={{ background: '#111114', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', fontSize: 12, fontFamily: 'var(--font)' }}>
+      <p style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>{label}</p>
+      {payload.map(p => (
+        <p key={p.dataKey} style={{ color: p.fill }}>{p.name}: {formatCLP(p.value)}</p>
+      ))}
+      {income > 0 && (
+        <p style={{ color: savings >= 0 ? 'var(--green)' : 'var(--red)', marginTop: 5, paddingTop: 5, borderTop: '1px solid rgba(255,255,255,.08)' }}>
+          Ahorro: {savings >= 0 ? '+' : ''}{formatCLP(savings)}
+        </p>
+      )}
     </div>
   )
 }
@@ -52,200 +47,138 @@ export default function Annual() {
 
   useEffect(() => {
     setLoading(true)
-    api.annual(year)
-      .then(setData)
-      .catch(() => {})
-      .finally(() => setLoading(false))
+    api.annual(year).then(setData).catch(() => {}).finally(() => setLoading(false))
   }, [year])
 
   const chartData = useMemo(() => {
-    const trendMap = Object.fromEntries(
-      (data?.monthly_trend ?? []).map(m => [m.month, m])
-    )
+    const trendMap = Object.fromEntries((data?.monthly_trend ?? []).map(m => [m.month, m]))
     return Array.from({ length: 12 }, (_, i) => {
       const m = trendMap[i + 1]
-      return {
-        name:      MONTH_ABBR[i],
-        Ingresos:  m?.income   ?? 0,
-        Egresos:   m?.expenses ?? 0,
-      }
+      return { name: MONTH_ABBR[i], Ingresos: m?.income ?? 0, Egresos: m?.expenses ?? 0 }
     })
   }, [data])
 
   const kpis = data?.kpis ?? {}
-  const netSavings = (kpis.income_ytd ?? 0) - (kpis.expenses_ytd ?? 0) - (kpis.investments_ytd ?? 0)
+  const income      = kpis.income_ytd      ?? 0
+  const expenses    = kpis.expenses_ytd    ?? 0
+  const investments = kpis.investments_ytd ?? 0
+  const netWorth    = kpis.net_worth       ?? 0
+  const balNeto     = income - expenses
 
   const months = data?.monthly_trend ?? []
-  const bestMonth = months.reduce(
-    (best, m) => (m.balance > (best?.balance ?? -Infinity) ? m : best),
-    null
-  )
-  const worstMonth = months.filter(m => m.expenses > 0).reduce(
-    (worst, m) => (m.expenses > (worst?.expenses ?? -Infinity) ? m : worst),
-    null
-  )
+  const monthFlows = months.map(m => (m.income ?? 0) - (m.expenses ?? 0))
+  const completedM  = months.filter(m => (m.income ?? 0) > 0 || (m.expenses ?? 0) > 0).length
+  const bestIdx     = monthFlows.indexOf(Math.max(...monthFlows, -Infinity))
+  const worstIdx    = monthFlows.indexOf(Math.min(...monthFlows, Infinity))
+  const avgIn       = completedM > 0 ? income / completedM : 0
+  const avgEg       = completedM > 0 ? expenses / completedM : 0
+  const now         = new Date()
+  const remMonths   = year === now.getFullYear() ? 11 - now.getMonth() : 0
+  const projSaldo   = netWorth + (avgIn - avgEg) * remMonths
 
-  const top10 = (data?.top_expenses ?? []).slice(0, 10)
-  const installments = data?.active_installments ?? []
+  const pctAhorro   = income > 0 ? +(balNeto / income * 100).toFixed(1) : 0
+  const pctVida     = income > 0 ? +(expenses / income * 100).toFixed(1) : 0
+  const pctInvPct   = income > 0 ? +(investments / income * 100).toFixed(1) : 0
+
+  const top10 = [...(data?.top_expenses ?? [])].sort((a, b) => b.amount - a.amount).slice(0, 10)
+  const catSummary = data?.categories ?? []
+  const MONTHS_ARR = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 
   return (
-    <div className="p-6 max-w-5xl">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-6">
+    <div className="fade">
+      <div className="ph ph-row">
         <div>
-          <h1 className="text-2xl font-bold text-white">Vista Anual</h1>
-          <p className="text-white/35 text-sm mt-0.5">Resumen, proyecciones e insights</p>
+          <div className="ph-title">Vista Anual</div>
+          <div className="ph-sub">Resumen, proyecciones e insights</div>
         </div>
-        <select
-          value={year}
-          onChange={e => setYear(Number(e.target.value))}
-          className="glass-input rounded-xl px-3 py-2 text-sm"
-        >
-          {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
-        </select>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button className="nav-arrow" onClick={() => setYear(y => y - 1)}>‹</button>
+          <span style={{ fontSize: 15, fontWeight: 600 }}>{year}</span>
+          <button className="nav-arrow" onClick={() => setYear(y => y + 1)}>›</button>
+        </div>
+      </div>
+
+      <div className="stats">
+        <div className="stat"><div className="stat-lbl">Ingresos {year}</div><div className="stat-val" style={{ color: 'var(--green)', fontSize: 17 }}>{formatCLP(income)}</div></div>
+        <div className="stat"><div className="stat-lbl">Egresos {year}</div><div className="stat-val" style={{ color: 'var(--red)', fontSize: 17 }}>{formatCLP(expenses)}</div></div>
+        <div className="stat"><div className="stat-lbl">Inversiones</div><div className="stat-val" style={{ color: '#4cb8af', fontSize: 17 }}>{formatCLP(investments)}</div></div>
+        <div className="stat" style={{ borderColor: 'rgba(201,168,76,.25)' }}><div className="stat-lbl">Balance neto</div><div className="stat-val" style={{ color: balNeto >= 0 ? 'var(--accent)' : 'var(--red)', fontSize: 17 }}>{formatCLP(balNeto)}</div></div>
       </div>
 
       {loading ? <Spinner /> : (
         <>
-          {/* KPI row */}
-          <div className="grid grid-cols-4 gap-3 mb-5">
-            {[
-              { label: `Ingresos ${year}`,  value: formatCLP(kpis.income_ytd ?? 0),     color: 'text-emerald-400' },
-              { label: `Egresos ${year}`,   value: formatCLP(kpis.expenses_ytd ?? 0),   color: 'text-rose-400'    },
-              { label: 'Inversiones',        value: formatCLP(kpis.investments_ytd ?? 0), color: 'text-cyan-400'   },
-              { label: 'Balance neto',       value: formatCLP(netSavings),                color: netSavings >= 0 ? 'text-violet-300' : 'text-rose-400' },
-            ].map(k => (
-              <div key={k.label} className="glass rounded-xl p-4">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-white/30 mb-1">{k.label}</p>
-                <p className={`text-lg font-bold tabular ${k.color}`}>{k.value}</p>
-              </div>
-            ))}
+          {/* Full-year bar chart */}
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="card-title">Ingresos vs Egresos — {year}</div>
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={chartData} barCategoryGap="35%" margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                <XAxis dataKey="name" tick={{ fill: 'var(--text-muted)', fontSize: 11, fontFamily: 'Space Grotesk' }} axisLine={false} tickLine={false} />
+                <YAxis hide />
+                <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                <Legend wrapperStyle={{ fontSize: 11, color: '#888', fontFamily: 'Space Grotesk' }} />
+                <Bar dataKey="Ingresos" fill="rgba(76,175,125,0.55)" stroke="rgba(76,175,125,.9)" strokeWidth={1} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Egresos" fill="rgba(224,92,92,0.55)" stroke="rgba(224,92,92,.9)" strokeWidth={1} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
           </div>
 
-          {/* Main two columns */}
-          <div className="grid grid-cols-2 gap-4">
-            {/* Left: chart */}
-            <div className="glass rounded-2xl p-5">
-              <p className="text-[11px] font-semibold text-white/35 uppercase tracking-wider mb-4">
-                Ingresos vs Egresos — {year}
-              </p>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barCategoryGap="20%">
-                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.3)' }} tickLine={false} axisLine={false} />
-                  <YAxis tickFormatter={yFmt} tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.25)' }} tickLine={false} axisLine={false} width={44} />
-                  <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
-                  <Legend wrapperStyle={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', paddingTop: 8 }} />
-                  <Bar dataKey="Ingresos" fill="#34d399" radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="Egresos"  fill="#f43f5e" radius={[3, 3, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+          <div className="charts">
+            {/* Top 10 */}
+            <div className="card">
+              <div className="card-title">Top gastos del año</div>
+              {top10.length > 0 ? (
+                <ul className="top-list">
+                  {top10.map((t, i) => (
+                    <li key={i} className="top-item" style={{ padding: '3px 0' }}>
+                      <div className="top-left">
+                        <span style={{ width: 18, fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--mono)', textAlign: 'right', flexShrink: 0 }}>{i + 1}.</span>
+                        <div className="dot" style={{ background: getCatColor(t.category) }} />
+                        <div>
+                          <div className="top-desc">{t.description ?? t.desc ?? '—'}</div>
+                          <div className="top-cat">{t.date?.slice(0, 10)} · {t.category}</div>
+                        </div>
+                      </div>
+                      <div className="top-amt">-{formatCLP(t.amount)}</div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="empty-msg">Sin gastos este año</div>
+              )}
             </div>
 
-            {/* Right column */}
-            <div className="flex flex-col gap-4">
-              {/* Top 10 expenses */}
-              <div className="glass rounded-2xl p-5">
-                <p className="text-[11px] font-semibold text-white/35 uppercase tracking-wider mb-3">
-                  Top 10 gastos del año
-                </p>
-                {top10.length === 0 ? (
-                  <p className="text-center py-4 text-white/25 text-sm">Sin datos</p>
-                ) : (
-                  <div className="space-y-2">
-                    {top10.map((tx, i) => {
-                      const colors = CATEGORY_COLORS[tx.category] ?? FALLBACK_COLORS
-                      return (
-                        <div key={tx.id ?? i} className="flex items-center gap-2.5">
-                          <span className="text-white/20 text-[10px] w-4 text-right flex-shrink-0">{i + 1}</span>
-                          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${colors.dot}`} />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs text-white/70 truncate leading-tight">{tx.description}</p>
-                            <p className="text-[10px] text-white/30 uppercase leading-tight">{tx.category}</p>
-                          </div>
-                          <span className="text-xs font-semibold text-rose-400 tabular flex-shrink-0">
-                            -{formatCLP(tx.amount)}
-                          </span>
-                        </div>
-                      )
-                    })}
-                  </div>
+            {/* Insights */}
+            <div className="card">
+              <div className="card-title">Insights económicos</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <InsightRow icon="%" label="Tasa de ahorro" value={`${pctAhorro}%`}
+                  sub={pctAhorro >= 20 ? 'Sobre el 20% — excelente' : 'Por debajo del objetivo del 20%'}
+                  good={pctAhorro >= 20} />
+                <InsightRow icon="⌂" label="Costo de vida / ingresos" value={`${pctVida}%`}
+                  sub={pctVida <= 50 ? 'Bajo control — regla del 50%' : 'Por encima del 50% recomendado'}
+                  good={pctVida <= 50} />
+                <InsightRow icon="↑" label="% invertido" value={`${pctInvPct}%`}
+                  sub={pctInvPct >= 20 ? 'Sobre el 20% — muy bien' : 'Regla del 20% en inversiones'}
+                  good={pctInvPct >= 20} />
+                {bestIdx >= 0 && months[bestIdx] && (
+                  <InsightRow icon="★" label="Mejor mes"
+                    value={MONTHS_ARR[months[bestIdx].month - 1] ?? '—'}
+                    sub={`Flujo: +${formatCLP(monthFlows[bestIdx])}`}
+                    good={true} />
+                )}
+                {worstIdx >= 0 && months[worstIdx] && (
+                  <InsightRow icon="▼" label="Mes más caro"
+                    value={MONTHS_ARR[months[worstIdx].month - 1] ?? '—'}
+                    sub={`Flujo: ${formatCLP(monthFlows[worstIdx])}`}
+                    good={monthFlows[worstIdx] >= 0} />
+                )}
+                {remMonths > 0 && (
+                  <InsightRow icon="→" label={`Proyección ${year}`}
+                    value={formatCLP(projSaldo)}
+                    sub={`Estimado al 31/12 (${remMonths} meses restantes)`}
+                    good={projSaldo >= netWorth} />
                 )}
               </div>
-
-              {/* Insights */}
-              <div className="glass rounded-2xl p-5">
-                <p className="text-[11px] font-semibold text-white/35 uppercase tracking-wider mb-2">
-                  Insights económicos
-                </p>
-                <InsightRow
-                  icon="📊"
-                  label="Tasa de ahorro"
-                  value={formatPct(kpis.investment_rate ?? 0)}
-                  valueColor={(kpis.investment_rate ?? 0) >= 0.1 ? 'text-emerald-400' : 'text-rose-400'}
-                />
-                <InsightRow
-                  icon="🏠"
-                  label="Costo de vida / Ingresos"
-                  value={formatPct(kpis.cost_of_living ?? 0)}
-                  valueColor={(kpis.cost_of_living ?? 0) <= 0.7 ? 'text-emerald-400' : (kpis.cost_of_living ?? 0) <= 0.9 ? 'text-amber-400' : 'text-rose-400'}
-                />
-                <InsightRow
-                  icon="📈"
-                  label="% Invertido"
-                  value={formatPct(kpis.investment_rate ?? 0)}
-                  valueColor="text-cyan-400"
-                />
-                <InsightRow
-                  icon="⬆"
-                  label="Mejor mes"
-                  value={bestMonth ? MONTH_ABBR[(bestMonth.month ?? 1) - 1] : '—'}
-                  valueColor="text-emerald-400"
-                />
-                <InsightRow
-                  icon="⬇"
-                  label="Mes más caro"
-                  value={worstMonth ? MONTH_ABBR[(worstMonth.month ?? 1) - 1] : '—'}
-                  valueColor="text-rose-400"
-                />
-                <InsightRow
-                  icon="🔮"
-                  label={`Proyección ${year}`}
-                  value={formatCLP(data?.projection ?? 0)}
-                  valueColor="text-violet-300"
-                />
-              </div>
-
-              {/* Active installments */}
-              {installments.length > 0 && (
-                <div className="glass rounded-2xl p-5">
-                  <p className="text-[11px] font-semibold text-white/35 uppercase tracking-wider mb-3">
-                    Cuotas de tarjeta activas
-                  </p>
-                  <div className="space-y-2">
-                    {installments.map((item, i) => (
-                      <div key={i} className="flex items-center justify-between">
-                        <div>
-                          <p className="text-xs text-white/65 truncate">{item.description}</p>
-                          <p className="text-[10px] text-white/30">
-                            {item.installment_current}/{item.installment_total} cuotas
-                          </p>
-                        </div>
-                        <span className="text-xs font-semibold text-rose-400 tabular">{formatCLP(item.amount)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {installments.length === 0 && (
-                <div className="glass rounded-2xl p-5">
-                  <p className="text-[11px] font-semibold text-white/35 uppercase tracking-wider mb-2">
-                    Cuotas de tarjeta activas
-                  </p>
-                  <p className="text-xs text-white/25 py-2">
-                    Sin cuotas activas. Al agregar movimientos con cuotas aparecerán aquí.
-                  </p>
-                </div>
-              )}
             </div>
           </div>
         </>

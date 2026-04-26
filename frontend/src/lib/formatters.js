@@ -15,8 +15,7 @@ export function formatPct(ratio) {
 
 export function formatDate(isoString) {
   if (!isoString) return ''
-  const d = new Date(isoString)
-  return d.toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric' })
+  return isoString.slice(0, 10).split('-').reverse().join('/')
 }
 
 const MONTH_NAMES = [

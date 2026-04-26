@@ -2,158 +2,141 @@ import { NavLink } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { api } from '../api/client'
 import { formatCLP } from '../lib/formatters'
+import { ACCT_COLORS } from '../lib/constants'
 
-function HomeIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.4">
-      <circle cx="7.5" cy="7.5" r="5.5" />
-    </svg>
-  )
-}
+function SyncButton() {
+  const [syncing, setSyncing] = useState(false)
+  const [status, setStatus] = useState(null) // 'ok' | 'err' | null
 
-function MensualIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.4">
-      <rect x="1.5" y="1.5" width="12" height="12" rx="2" />
-    </svg>
-  )
-}
+  async function handleSync() {
+    if (syncing) return
+    setSyncing(true)
+    setStatus(null)
+    try {
+      await api.sync()
+      setStatus('ok')
+    } catch {
+      setStatus('err')
+    } finally {
+      setSyncing(false)
+      setTimeout(() => setStatus(null), 3000)
+    }
+  }
 
-function AnualIcon() {
   return (
-    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.4">
-      <path d="M7.5 1L14 7.5L7.5 14L1 7.5Z" />
-    </svg>
-  )
-}
-
-function CategoriasIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.4">
-      <rect x="1.5" y="1.5" width="5" height="5" rx="1" />
-      <rect x="8.5" y="1.5" width="5" height="5" rx="1" />
-      <rect x="1.5" y="8.5" width="5" height="5" rx="1" />
-      <rect x="8.5" y="8.5" width="5" height="5" rx="1" />
-    </svg>
-  )
-}
-
-function MovimientosIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
-      <line x1="2" y1="4.5" x2="13" y2="4.5" />
-      <line x1="2" y1="7.5" x2="13" y2="7.5" />
-      <line x1="2" y1="10.5" x2="13" y2="10.5" />
-    </svg>
-  )
-}
-
-function CuentasIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.4">
-      <circle cx="7.5" cy="7.5" r="5.5" />
-      <circle cx="7.5" cy="7.5" r="1.5" />
-    </svg>
-  )
-}
-
-function PresupuestosIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.4">
-      <circle cx="7.5" cy="7.5" r="5.5" />
-      <circle cx="7.5" cy="7.5" r="2.5" />
-    </svg>
+    <div className="sb-sync">
+      <button
+        className={`sync-btn${syncing ? ' spinning' : ''}${status === 'ok' ? ' sync-ok' : ''}${status === 'err' ? ' sync-err' : ''}`}
+        onClick={handleSync}
+        disabled={syncing}
+        title="Sincronizar movimientos"
+      >
+        <span className="sync-icon">⟳</span>
+        <span className="sync-label">
+          {syncing ? 'Sincronizando…' : status === 'ok' ? 'Listo' : status === 'err' ? 'Error' : 'Sincronizar'}
+        </span>
+      </button>
+    </div>
   )
 }
 
 const NAV_ITEMS = [
-  { to: '/home',         label: 'Home',         Icon: HomeIcon         },
-  { to: '/mensual',      label: 'Mensual',       Icon: MensualIcon      },
-  { to: '/anual',        label: 'Anual',         Icon: AnualIcon        },
-  { to: '/categorias',   label: 'Categorías',    Icon: CategoriasIcon   },
-  { to: '/movimientos',  label: 'Movimientos',   Icon: MovimientosIcon  },
-  { to: '/cuentas',      label: 'Cuentas',       Icon: CuentasIcon      },
-  { to: '/presupuestos', label: 'Presupuestos',  Icon: PresupuestosIcon },
+  { to: '/home',         label: 'Home',        icon: '⬡' },
+  { to: '/mensual',      label: 'Mensual',      icon: '◫' },
+  { to: '/anual',        label: 'Anual',        icon: '◈' },
+  { to: '/categorias',   label: 'Categorías',   icon: '◧' },
+  { to: '/movimientos',  label: 'Movimientos',  icon: '≡' },
+  { to: '/cuentas',      label: 'Cuentas',      icon: '◎' },
+  { to: '/deudas',       label: 'Deudas',       icon: '⇄' },
+  { to: '/presupuestos', label: 'Presupuestos', icon: '◉' },
 ]
 
-export default function Sidebar() {
+function AccountSwitcher() {
+  const [accounts, setAccounts] = useState([])
   const [netWorth, setNetWorth] = useState(null)
+  const [open, setOpen] = useState(false)
 
   useEffect(() => {
-    api.kpis(new Date().getFullYear())
-      .then(k => setNetWorth(k.net_worth ?? null))
-      .catch(() => {})
+    api.accounts().then(d => setAccounts(Array.isArray(d) ? d : [])).catch(() => {})
+    api.kpis(new Date().getFullYear()).then(k => setNetWorth(k?.net_worth ?? null)).catch(() => {})
   }, [])
 
   return (
-    <aside className="sidebar">
-      {/* Logo */}
-      <div className="px-5 pt-5 pb-4">
-        <span className="text-violet-400 font-bold text-xs tracking-[0.25em] uppercase select-none">
-          Arasaka
-        </span>
-      </div>
-
-      {/* Account selector */}
-      <div className="px-3 mb-5">
-        <div className="rounded-xl px-3 py-2.5 glass cursor-pointer">
-          <div className="flex items-center justify-between">
-            <span className="text-emerald-400 text-xs font-medium">• Todas las cuentas</span>
-            <span className="text-white/20 text-[10px]">▾</span>
+    <div className="acct-switcher">
+      <div
+        onClick={() => setOpen(v => !v)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '6px 6px',
+          borderRadius: 7, cursor: 'pointer', transition: 'background var(--t)',
+        }}
+        onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+      >
+        <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            Todas las cuentas
           </div>
           {netWorth !== null && (
-            <p className="text-white/40 text-[11px] mt-0.5 tabular">
-              {formatCLP(netWorth)}
-            </p>
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--mono)' }}>{formatCLP(netWorth)}</div>
           )}
         </div>
+        <span style={{ fontSize: 9, color: 'var(--text-dim)' }}>{open ? '▲' : '▼'}</span>
       </div>
 
-      {/* Nav label */}
-      <div className="px-5 mb-2">
-        <span className="text-white/20 text-[9px] font-semibold uppercase tracking-[0.2em]">
-          Navegación
-        </span>
-      </div>
+      {open && accounts.length > 0 && (
+        <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 1 }}>
+          {accounts.map((a, i) => {
+            const color = ACCT_COLORS[i % ACCT_COLORS.length]
+            return (
+              <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', borderRadius: 5 }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</div>
+                  <div style={{ fontSize: 9, color: 'var(--text-dim)' }}>{a.bank_name}</div>
+                </div>
+                <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--text-dim)', flexShrink: 0 }}>
+                  {formatCLP(a.balance ?? 0)}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
 
-      {/* Nav items */}
-      <nav className="px-2 flex-1">
-        {NAV_ITEMS.map(({ to, label, Icon }) => (
+export default function Sidebar({ user, onLogout, open, onClose }) {
+  return (
+    <aside className={`sidebar${open ? ' open' : ''}`}>
+      <div className="sb-logo">ARASAKA</div>
+
+      <AccountSwitcher />
+
+      <div className="sb-label">Navegación</div>
+
+      <nav className="sb-nav">
+        {NAV_ITEMS.map(({ to, label, icon }) => (
           <NavLink
             key={to}
             to={to}
-            className={({ isActive }) =>
-              `flex items-center gap-2.5 px-3 py-[7px] rounded-xl text-[13px] font-medium mb-0.5 transition-colors ${
-                isActive
-                  ? 'bg-violet-500/20 text-white'
-                  : 'text-white/40 hover:text-white/65 hover:bg-white/5'
-              }`
-            }
+            onClick={onClose}
+            className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
           >
-            {({ isActive }) => (
-              <>
-                <span className={isActive ? 'text-violet-400' : 'text-white/25'}>
-                  <Icon />
-                </span>
-                {label}
-              </>
-            )}
+            <span className="nav-icon">{icon}</span>
+            {label}
           </NavLink>
         ))}
       </nav>
 
-      {/* User */}
-      <div className="px-4 py-4 mt-auto border-t border-white/5">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-full bg-violet-500/25 border border-violet-500/35 flex items-center justify-center text-[11px] font-semibold text-violet-300 flex-shrink-0">
-            U
-          </div>
-          <div className="min-w-0">
-            <p className="text-[12px] font-medium text-white leading-tight">Usuario</p>
-            <button className="text-[11px] text-white/25 hover:text-white/45 transition-colors leading-tight">
-              Cerrar sesión
-            </button>
-          </div>
+      <SyncButton />
+
+      <div className="sb-user">
+        <div className="avatar">{(user?.name || 'U')[0].toUpperCase()}</div>
+        <div>
+          <div className="sb-user-name">{user?.name || 'Usuario'}</div>
+          <div className="sb-user-out" onClick={onLogout}>Cerrar sesión</div>
         </div>
       </div>
     </aside>

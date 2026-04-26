@@ -39,6 +39,7 @@ type Transaction struct {
 	Flow           string    `json:"flow"                      db:"flow"`
 	Subtype        *string   `json:"subtype,omitempty"         db:"subtype"`
 	Asset          *string   `json:"asset,omitempty"           db:"asset"`
+	KeyUser        *string   `json:"key_user,omitempty"        db:"key_user"`
 	Quantity       *float64  `json:"quantity,omitempty"        db:"quantity"`
 	Amount         int64     `json:"amount"                    db:"amount"`
 	Notes          *string   `json:"notes,omitempty"           db:"notes"`
@@ -71,6 +72,7 @@ type CreateTransactionParams struct {
 	Flow        string
 	Subtype     *string
 	Asset       *string
+	KeyUser     *string
 	Quantity    *float64
 	Amount      int64
 	Notes       *string
@@ -89,6 +91,7 @@ type UpdateTransactionParams struct {
 	Flow        *string
 	Subtype     *string
 	Asset       *string
+	KeyUser     *string
 	Quantity    *float64
 	Amount      *int64
 	Notes       *string

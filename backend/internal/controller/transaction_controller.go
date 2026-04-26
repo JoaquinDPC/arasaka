@@ -56,6 +56,7 @@ type createTransactionReq struct {
 	Flow        string   `json:"flow"        binding:"required"`
 	Subtype     *string  `json:"subtype"`
 	Asset       *string  `json:"asset"`
+	KeyUser     *string  `json:"key_user"`
 	Quantity    *float64 `json:"quantity"`
 	Amount      int64    `json:"amount"      binding:"required,min=0"`
 	Notes       *string  `json:"notes"`
@@ -93,6 +94,7 @@ func (ctrl *TransactionController) Create(c *gin.Context) {
 		Flow:        req.Flow,
 		Subtype:     req.Subtype,
 		Asset:       req.Asset,
+		KeyUser:     req.KeyUser,
 		Quantity:    req.Quantity,
 		Amount:      req.Amount,
 		Notes:       req.Notes,
@@ -114,6 +116,7 @@ type updateTransactionReq struct {
 	Flow        *string   `json:"flow"`
 	Subtype     *string   `json:"subtype"`
 	Asset       *string   `json:"asset"`
+	KeyUser     *string   `json:"key_user"`
 	Quantity    *float64  `json:"quantity"`
 	Amount      *int64    `json:"amount"`
 	Notes       *string   `json:"notes"`
@@ -159,6 +162,7 @@ func (ctrl *TransactionController) Update(c *gin.Context) {
 	p.Flow = req.Flow
 	p.Subtype = req.Subtype
 	p.Asset = req.Asset
+	p.KeyUser = req.KeyUser
 	p.Quantity = req.Quantity
 	p.Amount = req.Amount
 	p.Notes = req.Notes

@@ -1,124 +1,58 @@
 import { useState, useEffect } from 'react'
 import { api } from '../api/client'
-import { formatCLP } from '../lib/formatters'
+import { formatCLP, formatDate } from '../lib/formatters'
+import { ACCT_COLORS, BANKS, ACCT_TYPES } from '../lib/constants'
 import Spinner from '../components/Spinner'
 
-const ACCOUNT_TYPES = ['Cuenta corriente', 'Cuenta de ahorro', 'Cuenta vista', 'Inversión', 'Otra']
-const CURRENCIES = ['CLP', 'USD', 'EUR']
-
-const TYPE_COLORS = {
-  'Cuenta corriente': 'bg-violet-500/20 text-violet-300 border border-violet-500/30',
-  'Cuenta de ahorro':  'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30',
-  'Cuenta vista':      'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30',
-  'Inversión':         'bg-amber-500/20 text-amber-300 border border-amber-500/30',
-  'Otra':              'bg-slate-500/20 text-slate-300 border border-slate-500/30',
-}
-
-const DOT_COLORS = ['bg-violet-400', 'bg-emerald-400', 'bg-cyan-400', 'bg-amber-400', 'bg-rose-400', 'bg-indigo-400']
-
-function AccountCard({ account, dotColor, onDeleted }) {
-  const badgeCls = TYPE_COLORS[account.type] ?? 'bg-slate-500/20 text-slate-300 border border-slate-500/30'
-  const balance  = account.balance ?? 0
-  const lastDate = account.last_movement
-    ? new Date(account.last_movement).toISOString().slice(0, 10)
-    : null
-
-  return (
-    <div className="glass rounded-2xl p-5 flex flex-col gap-3 relative">
-      <div className="flex items-start justify-between">
-        <span className={`w-2.5 h-2.5 rounded-full mt-0.5 ${dotColor}`} />
-        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${badgeCls}`}>
-          {account.type || 'Cuenta'}
-        </span>
-      </div>
-      <div>
-        <p className="text-xs text-white/35">{account.bank_name}</p>
-        <p className="text-base font-bold text-white mt-0.5">{account.name}</p>
-      </div>
-      <p className={`text-2xl font-bold tabular ${balance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-        {formatCLP(balance)}
-      </p>
-      <p className="text-xs text-white/25">
-        {account.movement_count ?? 0} movimientos
-        {lastDate && <> · último: {lastDate}</>}
-      </p>
-    </div>
-  )
-}
-
-function AddModal({ onClose, onSaved }) {
-  const [form, setForm] = useState({
-    bank_name: '',
-    name:      '',
-    type:      ACCOUNT_TYPES[0],
-    currency:  'CLP',
+function AccountModal({ account, onSave, onDelete, onClose }) {
+  const [f, setF] = useState({
+    name:     account?.name      ?? '',
+    bank_name: account?.bank_name ?? 'BCI',
+    type:     account?.type      ?? 'Cuenta corriente',
+    color:    account?.color     ?? ACCT_COLORS[0],
   })
-  const [saving, setSaving] = useState(false)
-  const [error, setError]   = useState(null)
-
-  function set(k, v) { setForm(f => ({ ...f, [k]: v })) }
-
-  async function handleSubmit(e) {
-    e.preventDefault()
-    if (!form.bank_name || !form.name) return
-    setSaving(true)
-    setError(null)
-    try {
-      await api.createAccount(form)
-      onSaved()
-    } catch {
-      setError('No se pudo crear la cuenta')
-    } finally {
-      setSaving(false)
-    }
-  }
-
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }))
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
-      <div className="glass-strong rounded-2xl p-6 w-full max-w-md">
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-base font-bold text-white">Nueva cuenta</h3>
-          <button onClick={onClose} className="text-white/30 hover:text-white/60 text-xl leading-none transition-colors">×</button>
+    <div className="overlay fade" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ width: 440 }}>
+        <div className="modal-ttl">{account ? 'Editar cuenta' : 'Nueva cuenta'}</div>
+        <div style={{ height: 4, borderRadius: 2, background: f.color, marginBottom: 20, opacity: .7 }} />
+        <div className="fgrid">
+          <div className="ff full">
+            <div className="flbl">Nombre</div>
+            <input className="finput" placeholder="Ej: Cuenta corriente BCI" value={f.name} onChange={e => set('name', e.target.value)} autoFocus />
+          </div>
+          <div className="ff">
+            <div className="flbl">Banco</div>
+            <select className="finput" value={f.bank_name} onChange={e => set('bank_name', e.target.value)}>
+              {BANKS.map(b => <option key={b}>{b}</option>)}
+            </select>
+          </div>
+          <div className="ff">
+            <div className="flbl">Tipo</div>
+            <select className="finput" value={f.type} onChange={e => set('type', e.target.value)}>
+              {ACCT_TYPES.map(t => <option key={t}>{t}</option>)}
+            </select>
+          </div>
+          <div className="ff full">
+            <div className="flbl">Color</div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+              {ACCT_COLORS.map(c => (
+                <div key={c} onClick={() => set('color', c)}
+                  style={{ width: 24, height: 24, borderRadius: '50%', background: c, cursor: 'pointer', border: `2px solid ${f.color === c ? 'white' : 'transparent'}`, transition: 'border-color var(--t)' }} />
+              ))}
+            </div>
+          </div>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div>
-            <label className="block text-[11px] text-white/35 mb-1">Banco</label>
-            <input
-              type="text" value={form.bank_name} onChange={e => set('bank_name', e.target.value)}
-              className="glass-input rounded-xl px-3 py-2 text-sm w-full" required placeholder="Ej: Banco de Chile"
-            />
-          </div>
-          <div>
-            <label className="block text-[11px] text-white/35 mb-1">Nombre de la cuenta</label>
-            <input
-              type="text" value={form.name} onChange={e => set('name', e.target.value)}
-              className="glass-input rounded-xl px-3 py-2 text-sm w-full" required placeholder="Ej: Cuenta principal"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] text-white/35 mb-1">Tipo</label>
-              <select value={form.type} onChange={e => set('type', e.target.value)} className="glass-input rounded-xl px-3 py-2 text-sm w-full">
-                {ACCOUNT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[11px] text-white/35 mb-1">Moneda</label>
-              <select value={form.currency} onChange={e => set('currency', e.target.value)} className="glass-input rounded-xl px-3 py-2 text-sm w-full">
-                {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-          </div>
-          {error && <p className="text-xs text-rose-400">{error}</p>}
-          <div className="flex gap-2 pt-1">
-            <button type="submit" disabled={saving} className="flex-1 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold disabled:opacity-50 transition-colors cursor-pointer">
-              {saving ? 'Guardando…' : 'Crear cuenta'}
+        <div className="mfooter">
+          {onDelete && (
+            <button onClick={onDelete} style={{ padding: '8px 16px', background: 'rgba(224,92,92,.15)', border: '1px solid rgba(224,92,92,.3)', borderRadius: 7, color: 'var(--red)', fontSize: 13, fontFamily: 'var(--font)', cursor: 'pointer', marginRight: 'auto' }}>
+              Eliminar
             </button>
-            <button type="button" onClick={onClose} className="px-4 py-2 rounded-xl glass text-white/50 hover:text-white text-sm transition-colors cursor-pointer">
-              Cancelar
-            </button>
-          </div>
-        </form>
+          )}
+          <button className="btn-ghost" onClick={onClose}>Cancelar</button>
+          <button className="btn-gold" onClick={() => f.name.trim() && onSave(f)}>Guardar</button>
+        </div>
       </div>
     </div>
   )
@@ -127,67 +61,98 @@ function AddModal({ onClose, onSaved }) {
 export default function Accounts() {
   const [accounts, setAccounts] = useState([])
   const [loading, setLoading]   = useState(true)
-  const [showAdd, setShowAdd]   = useState(false)
+  const [modal, setModal]       = useState(false)
+  const [editing, setEditing]   = useState(null)
 
   function load() {
     setLoading(true)
     api.accounts()
-      .then(data => setAccounts(Array.isArray(data) ? data : []))
+      .then(d => setAccounts(Array.isArray(d) ? d : []))
       .catch(() => setAccounts([]))
       .finally(() => setLoading(false))
   }
 
   useEffect(() => { load() }, [])
 
-  return (
-    <div className="p-6 max-w-4xl">
-      {showAdd && (
-        <AddModal
-          onClose={() => setShowAdd(false)}
-          onSaved={() => { setShowAdd(false); load() }}
-        />
-      )}
+  async function save(f) {
+    if (editing) await api.updateAccount(editing.id, f).catch(() => {})
+    else await api.createAccount(f).catch(() => {})
+    load()
+    setModal(false)
+    setEditing(null)
+  }
 
-      {/* Header */}
-      <div className="flex items-start justify-between mb-6">
+  async function remove(id) {
+    await api.deleteAccount(id).catch(() => {})
+    load()
+    setModal(false)
+    setEditing(null)
+  }
+
+  return (
+    <div className="fade">
+      <div className="ph" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
-          <h1 className="text-2xl font-bold text-white">Cuentas</h1>
-          <p className="text-white/35 text-sm mt-0.5">Gestiona tus cuentas bancarias</p>
+          <div className="ph-title">Cuentas</div>
+          <div className="ph-sub">Gestiona tus cuentas bancarias</div>
         </div>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold transition-colors cursor-pointer"
-        >
-          + Nueva cuenta
-        </button>
+        <button className="btn-gold" onClick={() => { setEditing(null); setModal(true) }}>+ Nueva cuenta</button>
       </div>
 
       {loading ? <Spinner /> : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-          {accounts.map((acc, i) => (
-            <AccountCard
-              key={acc.id}
-              account={acc}
-              dotColor={DOT_COLORS[i % DOT_COLORS.length]}
-              onDeleted={load}
-            />
-          ))}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 14 }}>
+          {accounts.map((a, i) => {
+            const color = a.color ?? ACCT_COLORS[i % ACCT_COLORS.length]
+            const bal = a.balance ?? 0
+            const last = a.last_movement ? formatDate(a.last_movement) : null
+            return (
+              <div key={a.id} className="card" style={{ borderColor: color + '44', cursor: 'pointer', transition: 'all var(--t)' }}
+                onClick={() => { setEditing(a); setModal(true) }}
+                onMouseEnter={e => e.currentTarget.style.borderColor = color + '99'}
+                onMouseLeave={e => e.currentTarget.style.borderColor = color + '44'}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: color }} />
+                  <span style={{ fontSize: 10, color, padding: '2px 8px', background: color + '18', borderRadius: 4, fontWeight: 700, letterSpacing: '0.04em' }}>{a.type || 'Cuenta'}</span>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3, fontWeight: 600, letterSpacing: '0.04em' }}>{a.bank_name}</div>
+                <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>{a.name}</div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 24, fontWeight: 700, color: bal >= 0 ? color : 'var(--red)', lineHeight: 1, marginBottom: 12 }}>
+                  {formatCLP(bal)}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                  {a.movement_count ?? 0} movimientos{last ? ` · último: ${last}` : ''}
+                </div>
+              </div>
+            )
+          })}
 
-          {/* Empty add card */}
-          <button
-            onClick={() => setShowAdd(true)}
-            className="glass rounded-2xl p-5 flex flex-col items-center justify-center gap-2 border-dashed hover:bg-white/5 transition-colors cursor-pointer min-h-[160px]"
-          >
-            <span className="text-3xl text-white/20">+</span>
-            <span className="text-xs text-white/25">Nueva cuenta</span>
-          </button>
+          {/* Add card */}
+          <div className="card" style={{ border: '1px dashed var(--border)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 160, opacity: .5, transition: 'opacity var(--t)' }}
+            onClick={() => { setEditing(null); setModal(true) }}
+            onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+            onMouseLeave={e => e.currentTarget.style.opacity = '.5'}>
+            <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+              <div style={{ fontSize: 24, marginBottom: 6 }}>+</div>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>Nueva cuenta</div>
+            </div>
+          </div>
         </div>
       )}
 
       {!loading && accounts.length === 0 && (
-        <p className="text-center py-8 text-white/25 text-sm">
-          No hay cuentas. Crea una para comenzar.
-        </p>
+        <div className="empty">
+          <h3>Sin cuentas</h3>
+          <p>Agrega tu primera cuenta bancaria.</p>
+        </div>
+      )}
+
+      {modal && (
+        <AccountModal
+          account={editing}
+          onSave={save}
+          onDelete={editing ? () => remove(editing.id) : null}
+          onClose={() => { setModal(false); setEditing(null) }}
+        />
       )}
     </div>
   )

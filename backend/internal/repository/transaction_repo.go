@@ -19,12 +19,12 @@ func NewTransactionRepository(db *sql.DB) domain.TransactionRepository {
 	return &transactionRepo{db: db}
 }
 
-const txColumns = `id, date, description, category, flow, subtype, asset, quantity, amount, notes, source, bank_raw_id, currency, cc_statement_id, account_id, tags, created_at, updated_at`
+const txColumns = `id, date, description, category, flow, subtype, asset, key_user, quantity, amount, notes, source, bank_raw_id, currency, cc_statement_id, account_id, tags, created_at, updated_at`
 
 func scanTx(s interface{ Scan(...any) error }, t *domain.Transaction) error {
 	return s.Scan(
 		&t.ID, &t.Date, &t.Description, &t.Category, &t.Flow,
-		&t.Subtype, &t.Asset, &t.Quantity, &t.Amount, &t.Notes,
+		&t.Subtype, &t.Asset, &t.KeyUser, &t.Quantity, &t.Amount, &t.Notes,
 		&t.Source, &t.BankRawID, &t.Currency, &t.CCStatementID, &t.AccountID,
 		pq.Array(&t.Tags),
 		&t.CreatedAt, &t.UpdatedAt,
@@ -37,7 +37,7 @@ const listColumns = txColumns + `, running_balance`
 func scanTxWithBalance(s interface{ Scan(...any) error }, t *domain.Transaction) error {
 	return s.Scan(
 		&t.ID, &t.Date, &t.Description, &t.Category, &t.Flow,
-		&t.Subtype, &t.Asset, &t.Quantity, &t.Amount, &t.Notes,
+		&t.Subtype, &t.Asset, &t.KeyUser, &t.Quantity, &t.Amount, &t.Notes,
 		&t.Source, &t.BankRawID, &t.Currency, &t.CCStatementID, &t.AccountID,
 		pq.Array(&t.Tags),
 		&t.CreatedAt, &t.UpdatedAt, &t.RunningBalance,
@@ -133,15 +133,15 @@ func (r *transactionRepo) Create(ctx context.Context, p domain.CreateTransaction
 	}
 	var t domain.Transaction
 	err := r.db.QueryRowContext(ctx, `
-		INSERT INTO transactions (date, description, category, flow, subtype, asset, quantity, amount, notes, source, bank_raw_id, currency, account_id, tags)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		INSERT INTO transactions (date, description, category, flow, subtype, asset, key_user, quantity, amount, notes, source, bank_raw_id, currency, account_id, tags)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		RETURNING `+txColumns,
 		p.Date, p.Description, p.Category, p.Flow, p.Subtype,
-		p.Asset, p.Quantity, p.Amount, p.Notes, p.Source, p.BankRawID, p.Currency,
+		p.Asset, p.KeyUser, p.Quantity, p.Amount, p.Notes, p.Source, p.BankRawID, p.Currency,
 		p.AccountID, pq.Array(p.Tags),
 	).Scan(
 		&t.ID, &t.Date, &t.Description, &t.Category, &t.Flow,
-		&t.Subtype, &t.Asset, &t.Quantity, &t.Amount, &t.Notes,
+		&t.Subtype, &t.Asset, &t.KeyUser, &t.Quantity, &t.Amount, &t.Notes,
 		&t.Source, &t.BankRawID, &t.Currency, &t.CCStatementID, &t.AccountID,
 		pq.Array(&t.Tags),
 		&t.CreatedAt, &t.UpdatedAt,
@@ -180,6 +180,9 @@ func (r *transactionRepo) Update(ctx context.Context, id int64, p domain.UpdateT
 	if p.Asset != nil {
 		add("asset", p.Asset)
 	}
+	if p.KeyUser != nil {
+		add("key_user", p.KeyUser)
+	}
 	if p.Quantity != nil {
 		add("quantity", p.Quantity)
 	}
@@ -207,8 +210,8 @@ func (r *transactionRepo) Update(ctx context.Context, id int64, p domain.UpdateT
 	var t domain.Transaction
 	err := r.db.QueryRowContext(ctx, query, args...).Scan(
 		&t.ID, &t.Date, &t.Description, &t.Category, &t.Flow,
-		&t.Subtype, &t.Asset, &t.Quantity, &t.Amount, &t.Notes,
-		&t.Source, &t.BankRawID, &t.Currency, &t.CCStatementID,
+		&t.Subtype, &t.Asset, &t.KeyUser, &t.Quantity, &t.Amount, &t.Notes,
+		&t.Source, &t.BankRawID, &t.Currency, &t.CCStatementID, &t.AccountID,
 		pq.Array(&t.Tags),
 		&t.CreatedAt, &t.UpdatedAt,
 	)
@@ -238,8 +241,8 @@ func (r *transactionRepo) CreateBatch(ctx context.Context, params []domain.Creat
 	defer tx.Rollback()
 
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO transactions (date, description, category, flow, subtype, asset, quantity, amount, notes, source, bank_raw_id, currency, account_id, tags)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		INSERT INTO transactions (date, description, category, flow, subtype, asset, key_user, quantity, amount, notes, source, bank_raw_id, currency, account_id, tags)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		ON CONFLICT ON CONSTRAINT transactions_dedup DO NOTHING
 	`)
 	if err != nil {
@@ -256,7 +259,7 @@ func (r *transactionRepo) CreateBatch(ctx context.Context, params []domain.Creat
 		}
 		res, err := stmt.ExecContext(ctx,
 			p.Date, p.Description, p.Category, p.Flow, p.Subtype,
-			p.Asset, p.Quantity, p.Amount, p.Notes, p.Source, p.BankRawID, p.Currency,
+			p.Asset, p.KeyUser, p.Quantity, p.Amount, p.Notes, p.Source, p.BankRawID, p.Currency,
 			p.AccountID, pq.Array(p.Tags),
 		)
 		if err != nil {
