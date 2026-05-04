@@ -17,20 +17,20 @@ func NewCreditCardRepository(db *sql.DB) domain.CreditCardRepository {
 }
 
 // UpsertStatement inserts a new statement or returns the existing one for the same
-// (account_id, period_from, period_to) tuple.
+// (external_account_id, period_from, period_to) tuple.
 func (r *creditCardRepo) UpsertStatement(ctx context.Context, p domain.CreateCCStatementParams) (domain.CreditCardStatement, error) {
 	if p.Currency == "" {
 		p.Currency = "CLP"
 	}
 	var s domain.CreditCardStatement
 	err := r.db.QueryRowContext(ctx, `
-		INSERT INTO credit_card_statements (account_id, period_from, period_to, due_date, currency, total_amount, min_payment)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO credit_card_statements (external_account_id, period_from, period_to, due_date, currency, total_amount, min_payment, account_id, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT ON CONSTRAINT cc_statements_dedup
 		DO UPDATE SET due_date = EXCLUDED.due_date, total_amount = EXCLUDED.total_amount, min_payment = EXCLUDED.min_payment
-		RETURNING id, account_id, period_from, period_to, due_date, currency, total_amount, min_payment, created_at
-	`, p.AccountID, p.PeriodFrom, p.PeriodTo, p.DueDate, p.Currency, p.TotalAmount, p.MinPayment,
-	).Scan(&s.ID, &s.AccountID, &s.PeriodFrom, &s.PeriodTo, &s.DueDate, &s.Currency, &s.TotalAmount, &s.MinPayment, &s.CreatedAt)
+		RETURNING id, external_account_id, period_from, period_to, due_date, currency, total_amount, min_payment, account_id, user_id, created_at
+	`, p.ExternalAccountID, p.PeriodFrom, p.PeriodTo, p.DueDate, p.Currency, p.TotalAmount, p.MinPayment, p.AccountID, p.UserID,
+	).Scan(&s.ID, &s.ExternalAccountID, &s.PeriodFrom, &s.PeriodTo, &s.DueDate, &s.Currency, &s.TotalAmount, &s.MinPayment, &s.AccountID, &s.UserID, &s.CreatedAt)
 	return s, err
 }
 
@@ -49,8 +49,8 @@ func (r *creditCardRepo) CreateItemsBatch(ctx context.Context, items []domain.Cr
 
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO credit_card_items
-			(statement_id, date, description, amount, currency, installment_current, installment_total, item_type, bank_raw_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			(statement_id, date, description, amount, currency, installment_current, installment_total, item_type, bank_raw_id, account_id, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (bank_raw_id) DO NOTHING
 	`)
 	if err != nil {
@@ -65,6 +65,7 @@ func (r *creditCardRepo) CreateItemsBatch(ctx context.Context, items []domain.Cr
 		res, err := stmt.ExecContext(ctx,
 			it.StatementID, it.Date, it.Description, it.Amount, it.Currency,
 			it.InstallmentCurrent, it.InstallmentTotal, it.ItemType, it.BankRawID,
+			it.AccountID, it.UserID,
 		)
 		if err != nil {
 			return 0, 0, fmt.Errorf("inserting cc item: %w", err)
@@ -82,9 +83,9 @@ func (r *creditCardRepo) CreateItemsBatch(ctx context.Context, items []domain.Cr
 
 func (r *creditCardRepo) ListStatements(ctx context.Context) ([]domain.CreditCardStatement, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, account_id, period_from, period_to, due_date, currency, total_amount, min_payment, created_at
+		SELECT id, external_account_id, period_from, period_to, due_date, currency, total_amount, min_payment, account_id, user_id, created_at
 		FROM credit_card_statements
-		ORDER BY period_to DESC, account_id
+		ORDER BY period_to DESC, external_account_id
 	`)
 	if err != nil {
 		return nil, err
@@ -94,7 +95,7 @@ func (r *creditCardRepo) ListStatements(ctx context.Context) ([]domain.CreditCar
 	var stmts []domain.CreditCardStatement
 	for rows.Next() {
 		var s domain.CreditCardStatement
-		if err := rows.Scan(&s.ID, &s.AccountID, &s.PeriodFrom, &s.PeriodTo, &s.DueDate, &s.Currency, &s.TotalAmount, &s.MinPayment, &s.CreatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.ExternalAccountID, &s.PeriodFrom, &s.PeriodTo, &s.DueDate, &s.Currency, &s.TotalAmount, &s.MinPayment, &s.AccountID, &s.UserID, &s.CreatedAt); err != nil {
 			return nil, err
 		}
 		stmts = append(stmts, s)
@@ -108,9 +109,9 @@ func (r *creditCardRepo) ListStatements(ctx context.Context) ([]domain.CreditCar
 func (r *creditCardRepo) GetStatementByID(ctx context.Context, id int64) (domain.CreditCardStatement, error) {
 	var s domain.CreditCardStatement
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, account_id, period_from, period_to, due_date, currency, total_amount, min_payment, created_at
+		SELECT id, external_account_id, period_from, period_to, due_date, currency, total_amount, min_payment, account_id, user_id, created_at
 		FROM credit_card_statements WHERE id = $1
-	`, id).Scan(&s.ID, &s.AccountID, &s.PeriodFrom, &s.PeriodTo, &s.DueDate, &s.Currency, &s.TotalAmount, &s.MinPayment, &s.CreatedAt)
+	`, id).Scan(&s.ID, &s.ExternalAccountID, &s.PeriodFrom, &s.PeriodTo, &s.DueDate, &s.Currency, &s.TotalAmount, &s.MinPayment, &s.AccountID, &s.UserID, &s.CreatedAt)
 	if err == sql.ErrNoRows {
 		return domain.CreditCardStatement{}, fmt.Errorf("not found")
 	}
@@ -120,7 +121,7 @@ func (r *creditCardRepo) GetStatementByID(ctx context.Context, id int64) (domain
 
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, statement_id, date, description, amount, currency,
-		       installment_current, installment_total, item_type, bank_raw_id, created_at
+		       installment_current, installment_total, item_type, bank_raw_id, account_id, user_id, created_at
 		FROM credit_card_items WHERE statement_id = $1 ORDER BY date, id
 	`, id)
 	if err != nil {
@@ -132,7 +133,8 @@ func (r *creditCardRepo) GetStatementByID(ctx context.Context, id int64) (domain
 		var it domain.CreditCardItem
 		if err := rows.Scan(
 			&it.ID, &it.StatementID, &it.Date, &it.Description, &it.Amount, &it.Currency,
-			&it.InstallmentCurrent, &it.InstallmentTotal, &it.ItemType, &it.BankRawID, &it.CreatedAt,
+			&it.InstallmentCurrent, &it.InstallmentTotal, &it.ItemType, &it.BankRawID,
+			&it.AccountID, &it.UserID, &it.CreatedAt,
 		); err != nil {
 			return domain.CreditCardStatement{}, err
 		}

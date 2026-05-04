@@ -18,10 +18,10 @@ func NewAccountRepository(db *sql.DB) domain.AccountRepository {
 	return &accountRepo{db: db}
 }
 
-func (r *accountRepo) List(ctx context.Context) ([]domain.Account, error) {
+func (r *accountRepo) List(ctx context.Context, userID int64) ([]domain.Account, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
-			a.id, a.bank_name, a.name, a.type, a.currency, a.created_at, a.updated_at,
+			a.id, a.user_id, a.bank_id, a.name, a.type, a.currency, a.created_at, a.updated_at,
 			COALESCE(SUM(
 				CASE
 					WHEN t.flow IN ('INCOME', 'OPENING') THEN  t.amount
@@ -33,9 +33,10 @@ func (r *accountRepo) List(ctx context.Context) ([]domain.Account, error) {
 			MAX(t.date) AS last_movement
 		FROM accounts a
 		LEFT JOIN transactions t ON t.account_id = a.id
-		GROUP BY a.id, a.bank_name, a.name, a.type, a.currency, a.created_at, a.updated_at
+		WHERE a.user_id = $1
+		GROUP BY a.id, a.user_id, a.bank_id, a.name, a.type, a.currency, a.created_at, a.updated_at
 		ORDER BY a.created_at ASC
-	`)
+	`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +46,7 @@ func (r *accountRepo) List(ctx context.Context) ([]domain.Account, error) {
 	for rows.Next() {
 		var a domain.Account
 		if err := rows.Scan(
-			&a.ID, &a.BankName, &a.Name, &a.Type, &a.Currency,
+			&a.ID, &a.UserID, &a.BankID, &a.Name, &a.Type, &a.Currency,
 			&a.CreatedAt, &a.UpdatedAt,
 			&a.Balance, &a.MovementCount, &a.LastMovement,
 		); err != nil {
@@ -68,11 +69,11 @@ func (r *accountRepo) Create(ctx context.Context, p domain.CreateAccountParams) 
 	}
 	var a domain.Account
 	err := r.db.QueryRowContext(ctx, `
-		INSERT INTO accounts (bank_name, name, type, currency)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, bank_name, name, type, currency, created_at, updated_at
-	`, p.BankName, p.Name, p.Type, p.Currency).Scan(
-		&a.ID, &a.BankName, &a.Name, &a.Type, &a.Currency, &a.CreatedAt, &a.UpdatedAt,
+		INSERT INTO accounts (user_id, bank_id, name, type, currency)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, user_id, bank_id, name, type, currency, created_at, updated_at
+	`, p.UserID, p.BankID, p.Name, p.Type, p.Currency).Scan(
+		&a.ID, &a.UserID, &a.BankID, &a.Name, &a.Type, &a.Currency, &a.CreatedAt, &a.UpdatedAt,
 	)
 	return a, err
 }
@@ -90,8 +91,8 @@ func (r *accountRepo) Update(ctx context.Context, id int64, p domain.UpdateAccou
 		n++
 	}
 
-	if p.BankName != nil {
-		add("bank_name", *p.BankName)
+	if p.BankID != nil {
+		add("bank_id", *p.BankID)
 	}
 	if p.Name != nil {
 		add("name", *p.Name)
@@ -110,12 +111,12 @@ func (r *accountRepo) Update(ctx context.Context, id int64, p domain.UpdateAccou
 
 	query := fmt.Sprintf(`
 		UPDATE accounts SET %s WHERE id = $%d
-		RETURNING id, bank_name, name, type, currency, created_at, updated_at
+		RETURNING id, bank_id, name, type, currency, created_at, updated_at
 	`, set, n)
 
 	var a domain.Account
 	err := r.db.QueryRowContext(ctx, query, args...).Scan(
-		&a.ID, &a.BankName, &a.Name, &a.Type, &a.Currency, &a.CreatedAt, &a.UpdatedAt,
+		&a.ID, &a.BankID, &a.Name, &a.Type, &a.Currency, &a.CreatedAt, &a.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return domain.Account{}, fmt.Errorf("not found")

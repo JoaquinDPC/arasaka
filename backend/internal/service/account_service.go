@@ -15,8 +15,8 @@ func NewAccountService(repo domain.AccountRepository) *AccountService {
 	return &AccountService{repo: repo}
 }
 
-func (s *AccountService) List(ctx context.Context) ([]domain.Account, error) {
-	return s.repo.List(ctx)
+func (s *AccountService) List(ctx context.Context, userID int64) ([]domain.Account, error) {
+	return s.repo.List(ctx, userID)
 }
 
 func (s *AccountService) Create(ctx context.Context, p domain.CreateAccountParams) (domain.Account, error) {

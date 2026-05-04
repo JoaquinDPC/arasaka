@@ -9,7 +9,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	ginSwagger "github.com/swaggo/gin-swagger"
@@ -18,6 +20,7 @@ import (
 	_ "arasaka/docs"
 	"arasaka/internal/config"
 	"arasaka/internal/controller"
+	"arasaka/internal/logger"
 	"arasaka/internal/repository"
 	"arasaka/internal/service"
 )
@@ -31,6 +34,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: server -config=<path/to/config.yml>")
 		os.Exit(1)
 	}
+
+	log := logger.New()
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -51,35 +56,42 @@ func main() {
 	}
 
 	// ── Repositories ──────────────────────────────────────────────────────────
+	userRepo := repository.NewUserRepository(db)
 	accountRepo := repository.NewAccountRepository(db)
 	txRepo := repository.NewTransactionRepository(db)
 	budgetRepo := repository.NewBudgetRepository(db)
+	userTagRepo := repository.NewUserTagRepository(db)
+	tagBudgetRepo := repository.NewTagBudgetRepository(db)
 	reportRepo := repository.NewReportRepository(db)
 
 	// ── Services ──────────────────────────────────────────────────────────────
+	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
 	accountSvc := service.NewAccountService(accountRepo)
-	txSvc := service.NewTransactionService(txRepo)
+	budgetSvc := service.NewBudgetService(budgetRepo, userTagRepo, tagBudgetRepo)
+	txSvc := service.NewTransactionService(txRepo, budgetRepo, userTagRepo)
 	reportSvc := service.NewReportService(reportRepo)
-	budgetSvc := service.NewBudgetService(budgetRepo)
-
-	// ── Services ──────────────────────────────────────────────────────────────
-	syncSvc := service.NewSyncService(db, cfg.BancochileUser, cfg.BancochilePassword)
+	syncSvc := service.NewSyncService(db, cfg.BancochileUser, cfg.BancochilePassword, cfg.SantanderUser, cfg.SantanderPassword, log)
+	importSvc := service.NewImportService(db)
 
 	// ── Controllers ───────────────────────────────────────────────────────────
 	ctrl := Controllers{
+		Auth:         controller.NewAuthController(authSvc),
 		Accounts:     controller.NewAccountController(accountSvc),
 		Transactions: controller.NewTransactionController(txSvc),
 		Budgets:      controller.NewBudgetController(budgetSvc),
 		Reports:      controller.NewReportController(reportSvc),
 		Insights:     controller.NewInsightController(reportSvc),
 		Sync:         controller.NewSyncController(syncSvc),
+		Import:       controller.NewImportController(importSvc),
 	}
 
 	gin.SetMode(gin.ReleaseMode)
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Recovery())
 	r.Use(corsMiddleware())
+	r.Use(requestLogger(log))
 
-	registerRoutes(r, ctrl)
+	registerRoutes(r, ctrl, cfg.JWTSecret)
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	addr := ":" + cfg.ServerPort
@@ -90,6 +102,30 @@ func main() {
 	}
 }
 
+func requestLogger(log *slog.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+
+		status := c.Writer.Status()
+		attrs := []any{
+			"method", c.Request.Method,
+			"path", c.Request.URL.Path,
+			"status", status,
+			"latency", time.Since(start).Round(time.Millisecond),
+		}
+
+		switch {
+		case status >= 500:
+			log.Error("request", attrs...)
+		case status >= 400:
+			log.Warn("request", attrs...)
+		default:
+			log.Info("request", attrs...)
+		}
+	}
+}
+
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
@@ -97,7 +133,7 @@ func corsMiddleware() gin.HandlerFunc {
 			c.Header("Access-Control-Allow-Origin", origin)
 		}
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return

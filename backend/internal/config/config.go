@@ -10,8 +10,11 @@ import (
 type Config struct {
 	DatabaseURL        string `yaml:"database_url"`
 	ServerPort         string `yaml:"server_port"`
+	JWTSecret          string `yaml:"jwt_secret"`
 	BancochileUser     string `yaml:"bancochile_user"`
 	BancochilePassword string `yaml:"bancochile_password"`
+	SantanderUser      string `yaml:"santander_user"`
+	SantanderPassword  string `yaml:"santander_password"`
 }
 
 // Load parses the YAML file at path and returns the validated config.
@@ -32,6 +35,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.ServerPort == "" {
 		cfg.ServerPort = "8080"
+	}
+	if cfg.JWTSecret == "" {
+		cfg.JWTSecret = "change-me-in-production"
 	}
 
 	return &cfg, nil

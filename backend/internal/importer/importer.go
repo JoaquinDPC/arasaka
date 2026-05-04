@@ -5,8 +5,8 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"math"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -57,9 +57,10 @@ type CCStatementResult struct {
 
 // Run processes records, routing corriente → transactions, credito → CC tables.
 // fromDate is the exclusive lower bound; zero value means import everything.
+// accountID links imported bank transactions to a specific account when non-nil.
 // Records are iterated in reverse so that JSON-newest-first ordering yields
 // oldest records getting the lowest DB IDs.
-func Run(ctx context.Context, db *sql.DB, records []MovimientoRecord, fromDate time.Time) (Result, error) {
+func Run(ctx context.Context, db *sql.DB, records []MovimientoRecord, fromDate time.Time, accountID *int64, userID *int64, logger *slog.Logger) (Result, error) {
 	txRepo := repository.NewTransactionRepository(db)
 	ccRepo := repository.NewCreditCardRepository(db)
 
@@ -70,14 +71,14 @@ func Run(ctx context.Context, db *sql.DB, records []MovimientoRecord, fromDate t
 		r := records[i]
 		if !fromDate.IsZero() {
 			d, _ := ParseDate(r.Date)
-			if !d.After(fromDate) {
+			if d.Before(fromDate) {
 				continue
 			}
 		}
 		if r.AccountType == "corriente" {
-			p, err := mapBankRecord(r)
+			p, err := mapBankRecord(r, accountID, userID)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "skip bank record %q: %v\n", r.Description, err)
+				logger.Warn("skip bank record", "description", r.Description, "err", err)
 				continue
 			}
 			bankParams = append(bankParams, p)
@@ -97,18 +98,18 @@ func Run(ctx context.Context, db *sql.DB, records []MovimientoRecord, fromDate t
 		result.BankDuplicates = dupes
 		// After inserting bank transactions, link any that match existing CC statements.
 		if err := LinkAllStatements(ctx, db); err != nil {
-			fmt.Fprintf(os.Stderr, "warn: link all statements: %v\n", err)
+			logger.Warn("link all statements failed", "err", err)
 		}
 	}
 
 	for accountID, items := range ccByAccount {
-		stmt, itemsImported, itemsDupes, err := importCCStatement(ctx, ccRepo, accountID, items)
+		stmt, itemsImported, itemsDupes, err := importCCStatement(ctx, ccRepo, accountID, items, logger)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "import cc statement %q: %v\n", accountID, err)
+			logger.Warn("import cc statement failed", "account_id", accountID, "err", err)
 			continue
 		}
 		if err := LinkBankPayment(ctx, db, stmt); err != nil {
-			fmt.Fprintf(os.Stderr, "warn: link bank payment: %v\n", err)
+			logger.Warn("link bank payment failed", "statement_id", stmt.ID, "err", err)
 		}
 		result.CCStatements = append(result.CCStatements, CCStatementResult{
 			AccountID:       accountID,
@@ -121,7 +122,7 @@ func Run(ctx context.Context, db *sql.DB, records []MovimientoRecord, fromDate t
 	return result, nil
 }
 
-func mapBankRecord(r MovimientoRecord) (domain.CreateTransactionParams, error) {
+func mapBankRecord(r MovimientoRecord, accountID *int64, userID *int64) (domain.CreateTransactionParams, error) {
 	date, err := ParseDate(r.Date)
 	if err != nil {
 		return domain.CreateTransactionParams{}, fmt.Errorf("parse date: %w", err)
@@ -148,10 +149,12 @@ func mapBankRecord(r MovimientoRecord) (domain.CreateTransactionParams, error) {
 		Currency:    "CLP",
 		Source:      "bank_json",
 		BankRawID:   &rawID,
+		AccountID:   accountID,
+		UserID:      userID,
 	}, nil
 }
 
-func importCCStatement(ctx context.Context, ccRepo domain.CreditCardRepository, accountID string, records []MovimientoRecord) (domain.CreditCardStatement, int, int, error) {
+func importCCStatement(ctx context.Context, ccRepo domain.CreditCardRepository, accountID string, records []MovimientoRecord, logger *slog.Logger) (domain.CreditCardStatement, int, int, error) {
 	currency := "CLP"
 	if len(records) > 0 && records[0].Currency == "USD" {
 		currency = "USD"
@@ -168,11 +171,11 @@ func importCCStatement(ctx context.Context, ccRepo domain.CreditCardRepository, 
 	}
 
 	stmt, err := ccRepo.UpsertStatement(ctx, domain.CreateCCStatementParams{
-		AccountID:   accountID,
-		PeriodFrom:  periodFrom,
-		PeriodTo:    periodTo,
-		Currency:    currency,
-		TotalAmount: total,
+		ExternalAccountID: accountID,
+		PeriodFrom:        periodFrom,
+		PeriodTo:          periodTo,
+		Currency:          currency,
+		TotalAmount:       total,
 	})
 	if err != nil {
 		return domain.CreditCardStatement{}, 0, 0, fmt.Errorf("upsert statement: %w", err)
@@ -182,7 +185,7 @@ func importCCStatement(ctx context.Context, ccRepo domain.CreditCardRepository, 
 	for _, r := range records {
 		item, err := mapCCItem(r, stmt.ID, currency)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  skip cc item %q: %v\n", r.Description, err)
+			logger.Warn("skip cc item", "description", r.Description, "err", err)
 			continue
 		}
 		itemParams = append(itemParams, item)
@@ -405,10 +408,28 @@ func mapCCItemType(txType string) string {
 }
 
 func bankRawID(r MovimientoRecord) string {
+	return BankRawID(r)
+}
+
+// BankRawID computes the deduplication key for a corriente movement.
+// Exported so callers can retroactively locate existing rows by raw ID.
+func BankRawID(r MovimientoRecord) string {
 	key := fmt.Sprintf("bj|%s|%s|%s|%s",
 		r.AccountID, r.RawData.DateStr, r.Amount, r.Description)
 	h := sha256.Sum256([]byte(key))
 	return fmt.Sprintf("bj_%x", h[:8])
+}
+
+// PDFRawID computes the deduplication key for a transaction imported from a PDF cartola.
+// Uses accountID + date + amount + description so that re-importing the same cartola
+// (or importing overlapping cartolas for the same account) never creates duplicates.
+// accountID scopes uniqueness per-account so different accounts can share the same
+// transaction without conflict.
+func PDFRawID(accountID int64, date time.Time, amount int64, description string) string {
+	key := fmt.Sprintf("pdf|%d|%s|%d|%s",
+		accountID, date.Format("2006-01-02"), amount, description)
+	h := sha256.Sum256([]byte(key))
+	return fmt.Sprintf("pdf_%x", h[:8])
 }
 
 func ccRawID(r MovimientoRecord) string {

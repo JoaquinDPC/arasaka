@@ -2,10 +2,20 @@ package domain
 
 import "time"
 
+// User is an authenticated principal that owns one or more accounts.
+type User struct {
+	ID           int64     `json:"id"         db:"id"`
+	Email        string    `json:"email"      db:"email"`
+	PasswordHash string    `json:"-"          db:"password_hash"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
+}
+
 // Account represents a bank account.
 type Account struct {
 	ID            int64      `json:"id"             db:"id"`
-	BankName      string     `json:"bank_name"      db:"bank_name"`
+	UserID        int64      `json:"user_id"        db:"user_id"`
+	BankID        string     `json:"bank_id"        db:"bank_id"`
 	Name          string     `json:"name"           db:"name"`
 	Type          string     `json:"type"           db:"type"`
 	Currency      string     `json:"currency"       db:"currency"`
@@ -17,16 +27,17 @@ type Account struct {
 }
 
 type CreateAccountParams struct {
-	BankName string
+	UserID   int64
+	BankID   string
 	Name     string
 	Type     string
 	Currency string
 }
 
 type UpdateAccountParams struct {
-	BankName *string
-	Name     *string
-	Type     *string
+	BankID *string
+	Name   *string
+	Type   *string
 }
 
 // Transaction is the core financial record.
@@ -52,6 +63,7 @@ type Transaction struct {
 	RunningBalance *int64    `json:"running_balance,omitempty" db:"running_balance"`
 	CreatedAt      time.Time `json:"created_at"                db:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"                db:"updated_at"`
+	UserID         *int64    `json:"user_id,omitempty"         db:"user_id"`
 }
 
 // TransactionFilter holds optional query filters for listing transactions.
@@ -61,7 +73,8 @@ type TransactionFilter struct {
 	Category  string
 	Flow      string
 	AccountID string
-	Limit     int // 0 means use default (1000)
+	Tags      []string // AND filter: rows must contain all listed tags (tags @> ARRAY[...])
+	Limit     int      // 0 means use default (1000)
 }
 
 // CreateTransactionParams carries the data needed to create a new transaction.
@@ -81,6 +94,7 @@ type CreateTransactionParams struct {
 	Currency    string   // defaults to "CLP" when empty
 	AccountID   *int64
 	Tags        []string // hashtag labels, e.g. ["#streaming", "#annual"]
+	UserID      *int64
 }
 
 // UpdateTransactionParams carries the optional fields for a partial update.
@@ -99,11 +113,13 @@ type UpdateTransactionParams struct {
 }
 
 type Budget struct {
-	ID       int64  `json:"id"       db:"id"`
-	Category string `json:"category" db:"category"`
-	Year     int    `json:"year"     db:"year"`
-	Month    int    `json:"month"    db:"month"`
-	Amount   int64  `json:"amount"   db:"amount"`
+	ID        int64  `json:"id"                   db:"id"`
+	UserID    int64  `json:"user_id"              db:"user_id"`
+	Category  string `json:"category"             db:"category"`
+	Year      int    `json:"year"                 db:"year"`
+	Month     int    `json:"month"                db:"month"`
+	Amount    int64  `json:"amount"               db:"amount"`
+	AccountID *int64 `json:"account_id,omitempty" db:"account_id"`
 }
 
 // MonthlyReport aggregates data for a single month.
@@ -126,6 +142,29 @@ type CategorySummary struct {
 	Budget       int64   `json:"budget"`
 	PctUsed      float64 `json:"pct_used"`
 	Transactions int     `json:"transactions"`
+}
+
+// TagSummary aggregates expense totals per tag for a given user and period.
+type TagSummary struct {
+	Tag          string `json:"tag"`
+	Total        int64  `json:"total"`
+	Transactions int    `json:"transactions"`
+}
+
+// TagBudget is a spending limit set by the user for a specific tag.
+type TagBudget struct {
+	ID     int64  `json:"id"      db:"id"`
+	UserID int64  `json:"user_id" db:"user_id"`
+	Tag    string `json:"tag"     db:"tag"`
+	Year   int    `json:"year"    db:"year"`
+	Month  int    `json:"month"   db:"month"`
+	Amount int64  `json:"amount"  db:"amount"`
+}
+
+// UserTagEntry is a user-curated tag with an optional icon override.
+type UserTagEntry struct {
+	Tag  string  `json:"tag"`
+	Icon *string `json:"icon,omitempty"`
 }
 
 type KPIReport struct {
@@ -163,41 +202,47 @@ type ImportResult struct {
 
 // CreditCardStatement represents a single billing cycle for a credit card account.
 type CreditCardStatement struct {
-	ID          int64            `json:"id"           db:"id"`
-	AccountID   string           `json:"account_id"   db:"account_id"`
-	PeriodFrom  time.Time        `json:"period_from"  db:"period_from"`
-	PeriodTo    time.Time        `json:"period_to"    db:"period_to"`
-	DueDate     *time.Time       `json:"due_date"     db:"due_date"`
-	Currency    string           `json:"currency"     db:"currency"`
-	TotalAmount int64            `json:"total_amount" db:"total_amount"`
-	MinPayment  int64            `json:"min_payment"  db:"min_payment"`
-	Items       []CreditCardItem `json:"items,omitempty"`
-	CreatedAt   time.Time        `json:"created_at"   db:"created_at"`
+	ID                 int64            `json:"id"                    db:"id"`
+	ExternalAccountID  string           `json:"external_account_id"   db:"external_account_id"`
+	PeriodFrom         time.Time        `json:"period_from"           db:"period_from"`
+	PeriodTo           time.Time        `json:"period_to"             db:"period_to"`
+	DueDate            *time.Time       `json:"due_date"              db:"due_date"`
+	Currency           string           `json:"currency"              db:"currency"`
+	TotalAmount        int64            `json:"total_amount"          db:"total_amount"`
+	MinPayment         int64            `json:"min_payment"           db:"min_payment"`
+	AccountID          *int64           `json:"account_id,omitempty"  db:"account_id"`
+	UserID             *int64           `json:"user_id,omitempty"     db:"user_id"`
+	Items              []CreditCardItem `json:"items,omitempty"`
+	CreatedAt          time.Time        `json:"created_at"            db:"created_at"`
 }
 
 // CreditCardItem is a single line on a credit card statement.
 type CreditCardItem struct {
-	ID                 int64     `json:"id"                           db:"id"`
-	StatementID        int64     `json:"statement_id"                 db:"statement_id"`
-	Date               time.Time `json:"date"                         db:"date"`
-	Description        string    `json:"description"                  db:"description"`
-	Amount             int64     `json:"amount"                       db:"amount"`
-	Currency           string    `json:"currency"                     db:"currency"`
+	ID                 int64     `json:"id"                            db:"id"`
+	StatementID        int64     `json:"statement_id"                  db:"statement_id"`
+	Date               time.Time `json:"date"                          db:"date"`
+	Description        string    `json:"description"                   db:"description"`
+	Amount             int64     `json:"amount"                        db:"amount"`
+	Currency           string    `json:"currency"                      db:"currency"`
 	InstallmentCurrent *int      `json:"installment_current,omitempty" db:"installment_current"`
 	InstallmentTotal   *int      `json:"installment_total,omitempty"   db:"installment_total"`
-	ItemType           string    `json:"item_type"                    db:"item_type"`
-	BankRawID          *string   `json:"-"                            db:"bank_raw_id"`
-	CreatedAt          time.Time `json:"created_at"                   db:"created_at"`
+	ItemType           string    `json:"item_type"                     db:"item_type"`
+	BankRawID          *string   `json:"-"                             db:"bank_raw_id"`
+	AccountID          *int64    `json:"account_id,omitempty"          db:"account_id"`
+	UserID             *int64    `json:"user_id,omitempty"             db:"user_id"`
+	CreatedAt          time.Time `json:"created_at"                    db:"created_at"`
 }
 
 type CreateCCStatementParams struct {
-	AccountID   string
-	PeriodFrom  time.Time
-	PeriodTo    time.Time
-	DueDate     *time.Time
-	Currency    string
-	TotalAmount int64
-	MinPayment  int64
+	ExternalAccountID string
+	PeriodFrom        time.Time
+	PeriodTo          time.Time
+	DueDate           *time.Time
+	Currency          string
+	TotalAmount       int64
+	MinPayment        int64
+	AccountID         *int64
+	UserID            *int64
 }
 
 type CreateCCItemParams struct {
@@ -210,4 +255,6 @@ type CreateCCItemParams struct {
 	InstallmentTotal   *int
 	ItemType           string
 	BankRawID          *string
+	AccountID          *int64
+	UserID             *int64
 }

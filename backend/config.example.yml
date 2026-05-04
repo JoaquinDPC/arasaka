@@ -1,8 +1,11 @@
 # Local development (go run / make run)
 database_url: "postgres://arasaka-user:arasaka-pass@localhost:5432/arasaka?sslmode=disable"
 server_port: "8080"
+jwt_secret: "change-me-in-production"
 bancochile_user: "12345678-9"
 bancochile_password: "your_password"
+santander_user: "12345678-9"
+santander_password: "your_password"
 
 # When running via docker compose, use the service name as host:
 # database_url: "postgres://arasaka-user:arasaka-pass@db:5432/arasaka?sslmode=disable"

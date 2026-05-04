@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -33,12 +34,21 @@ func NewTransactionController(svc *service.TransactionService) *TransactionContr
 // @Router       /transactions [get]
 func (ctrl *TransactionController) List(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.Query("limit"))
+	var tags []string
+	if raw := c.Query("tags"); raw != "" {
+		for _, t := range strings.Split(raw, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				tags = append(tags, t)
+			}
+		}
+	}
 	f := domain.TransactionFilter{
 		Year:      c.Query("year"),
 		Month:     c.Query("month"),
 		Category:  c.Query("category"),
 		Flow:      c.Query("flow"),
 		AccountID: c.Query("account_id"),
+		Tags:      tags,
 		Limit:     limit,
 	}
 	txs, err := ctrl.svc.List(c.Request.Context(), f)
@@ -52,7 +62,6 @@ func (ctrl *TransactionController) List(c *gin.Context) {
 type createTransactionReq struct {
 	Date        string   `json:"date"        binding:"required"`
 	Description string   `json:"description" binding:"required"`
-	Category    string   `json:"category"    binding:"required"`
 	Flow        string   `json:"flow"        binding:"required"`
 	Subtype     *string  `json:"subtype"`
 	Asset       *string  `json:"asset"`
@@ -87,10 +96,10 @@ func (ctrl *TransactionController) Create(c *gin.Context) {
 		return
 	}
 
+	userID := userIDFromContext(c)
 	t, err := ctrl.svc.Create(c.Request.Context(), domain.CreateTransactionParams{
 		Date:        date,
 		Description: req.Description,
-		Category:    req.Category,
 		Flow:        req.Flow,
 		Subtype:     req.Subtype,
 		Asset:       req.Asset,
@@ -101,6 +110,7 @@ func (ctrl *TransactionController) Create(c *gin.Context) {
 		Source:      "manual",
 		AccountID:   req.AccountID,
 		Tags:        req.Tags,
+		UserID:      &userID,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -112,7 +122,6 @@ func (ctrl *TransactionController) Create(c *gin.Context) {
 type updateTransactionReq struct {
 	Date        *string   `json:"date"`
 	Description *string   `json:"description"`
-	Category    *string   `json:"category"`
 	Flow        *string   `json:"flow"`
 	Subtype     *string   `json:"subtype"`
 	Asset       *string   `json:"asset"`
@@ -158,7 +167,6 @@ func (ctrl *TransactionController) Update(c *gin.Context) {
 		p.Date = &d
 	}
 	p.Description = req.Description
-	p.Category = req.Category
 	p.Flow = req.Flow
 	p.Subtype = req.Subtype
 	p.Asset = req.Asset
@@ -209,4 +217,42 @@ func (ctrl *TransactionController) Delete(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// ListUsedTags returns the top 15 tags by usage frequency for the authenticated user.
+func (ctrl *TransactionController) ListUsedTags(c *gin.Context) {
+	userID := userIDFromContext(c)
+	tags, err := ctrl.svc.ListUsedTags(c.Request.Context(), userID, 15)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, tags)
+}
+
+// TagSpending returns per-tag expense totals for the authenticated user.
+// Query params: year (required), month (optional, 0=full year), account_id (optional).
+func (ctrl *TransactionController) TagSpending(c *gin.Context) {
+	userID := userIDFromContext(c)
+	year, err := strconv.Atoi(c.Query("year"))
+	if err != nil || year == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "year required"})
+		return
+	}
+	month, _ := strconv.Atoi(c.Query("month"))
+	var accountID *int64
+	if raw := c.Query("account_id"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid account_id"})
+			return
+		}
+		accountID = &id
+	}
+	result, err := ctrl.svc.TagSpending(c.Request.Context(), userID, year, month, accountID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }

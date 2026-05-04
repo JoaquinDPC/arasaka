@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
 	"arasaka/internal/domain"
 )
@@ -16,12 +17,14 @@ func NewBudgetRepository(db *sql.DB) domain.BudgetRepository {
 	return &budgetRepo{db: db}
 }
 
-func (r *budgetRepo) List(ctx context.Context, year string) ([]domain.Budget, error) {
-	query := `SELECT id, category, year, month, amount FROM budgets WHERE 1=1`
-	var args []any
+func (r *budgetRepo) List(ctx context.Context, userID int64, year string) ([]domain.Budget, error) {
+	query := `SELECT id, user_id, category, year, month, amount, account_id FROM budgets WHERE user_id = $1`
+	args := []any{userID}
+	n := 2
 	if year != "" {
-		query += " AND year = $1"
+		query += fmt.Sprintf(" AND year = $%d", n)
 		args = append(args, year)
+		n++
 	}
 	query += " ORDER BY year DESC, month ASC, category ASC"
 
@@ -34,7 +37,7 @@ func (r *budgetRepo) List(ctx context.Context, year string) ([]domain.Budget, er
 	var budgets []domain.Budget
 	for rows.Next() {
 		var b domain.Budget
-		if err := rows.Scan(&b.ID, &b.Category, &b.Year, &b.Month, &b.Amount); err != nil {
+		if err := rows.Scan(&b.ID, &b.UserID, &b.Category, &b.Year, &b.Month, &b.Amount, &b.AccountID); err != nil {
 			return nil, err
 		}
 		budgets = append(budgets, b)
@@ -48,13 +51,13 @@ func (r *budgetRepo) List(ctx context.Context, year string) ([]domain.Budget, er
 func (r *budgetRepo) Upsert(ctx context.Context, b domain.Budget) (domain.Budget, error) {
 	var result domain.Budget
 	err := r.db.QueryRowContext(ctx, `
-		INSERT INTO budgets (category, year, month, amount)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO budgets (user_id, category, year, month, amount, account_id)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT ON CONSTRAINT budgets_unique
 		DO UPDATE SET amount = EXCLUDED.amount
-		RETURNING id, category, year, month, amount
-	`, b.Category, b.Year, b.Month, b.Amount).
-		Scan(&result.ID, &result.Category, &result.Year, &result.Month, &result.Amount)
+		RETURNING id, user_id, category, year, month, amount, account_id
+	`, b.UserID, b.Category, b.Year, b.Month, b.Amount, b.AccountID).
+		Scan(&result.ID, &result.UserID, &result.Category, &result.Year, &result.Month, &result.Amount, &result.AccountID)
 	return result, err
 }
 
@@ -66,8 +69,8 @@ func (r *budgetRepo) UpsertBatch(ctx context.Context, budgets []domain.Budget) e
 	defer tx.Rollback()
 
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO budgets (category, year, month, amount)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO budgets (user_id, category, year, month, amount, account_id)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT ON CONSTRAINT budgets_unique
 		DO UPDATE SET amount = EXCLUDED.amount
 	`)
@@ -77,21 +80,41 @@ func (r *budgetRepo) UpsertBatch(ctx context.Context, budgets []domain.Budget) e
 	defer stmt.Close()
 
 	for _, b := range budgets {
-		if _, err := stmt.ExecContext(ctx, b.Category, b.Year, b.Month, b.Amount); err != nil {
+		if _, err := stmt.ExecContext(ctx, b.UserID, b.Category, b.Year, b.Month, b.Amount, b.AccountID); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
 }
 
-func (r *budgetRepo) BudgetForCategory(ctx context.Context, category string, year, month int) (int64, error) {
+func (r *budgetRepo) ListCategories(ctx context.Context) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT category FROM budgets ORDER BY category`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var cats []string
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			return nil, err
+		}
+		cats = append(cats, c)
+	}
+	if cats == nil {
+		cats = []string{}
+	}
+	return cats, rows.Err()
+}
+
+func (r *budgetRepo) BudgetForCategory(ctx context.Context, userID int64, category string, year, month int) (int64, error) {
 	var amount int64
 	err := r.db.QueryRowContext(ctx, `
 		SELECT COALESCE(
-			(SELECT amount FROM budgets WHERE category=$1 AND year=$2 AND month=$3),
-			(SELECT amount FROM budgets WHERE category=$1 AND year=$2 AND month=0),
+			(SELECT amount FROM budgets WHERE user_id=$1 AND category=$2 AND year=$3 AND month=$4),
+			(SELECT amount FROM budgets WHERE user_id=$1 AND category=$2 AND year=$3 AND month=0),
 			0
 		)
-	`, category, year, month).Scan(&amount)
+	`, userID, category, year, month).Scan(&amount)
 	return amount, err
 }

@@ -16,19 +16,21 @@ func NewReportRepository(db *sql.DB) domain.ReportRepository {
 	return &reportRepo{db: db}
 }
 
-func (r *reportRepo) MonthlyTotals(ctx context.Context, year, month int) (income, expenses, investments int64, err error) {
+func (r *reportRepo) MonthlyTotals(ctx context.Context, year, month int, accountID *int64) (income, expenses, investments int64, err error) {
 	err = r.db.QueryRowContext(ctx, `
 		SELECT
 			COALESCE(SUM(CASE WHEN flow = 'INCOME'  THEN amount ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN flow = 'EXPENSE' THEN amount ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN flow = 'INVEST'  THEN amount ELSE 0 END), 0)
 		FROM transactions
-		WHERE EXTRACT(YEAR FROM date) = $1 AND EXTRACT(MONTH FROM date) = $2
-	`, year, month).Scan(&income, &expenses, &investments)
+		WHERE EXTRACT(YEAR FROM date) = $1
+		  AND EXTRACT(MONTH FROM date) = $2
+		  AND ($3::bigint IS NULL OR account_id = $3)
+	`, year, month, accountID).Scan(&income, &expenses, &investments)
 	return
 }
 
-func (r *reportRepo) CategoryTotals(ctx context.Context, year, month int) ([]domain.CategorySummary, error) {
+func (r *reportRepo) CategoryTotals(ctx context.Context, year, month int, accountID *int64) ([]domain.CategorySummary, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			t.category,
@@ -43,9 +45,10 @@ func (r *reportRepo) CategoryTotals(ctx context.Context, year, month int) ([]dom
 		WHERE EXTRACT(YEAR FROM t.date) = $1
 		  AND EXTRACT(MONTH FROM t.date) = $2
 		  AND t.flow = 'EXPENSE'
+		  AND ($3::bigint IS NULL OR t.account_id = $3)
 		GROUP BY t.category
 		ORDER BY total DESC
-	`, year, month)
+	`, year, month, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -68,15 +71,16 @@ func (r *reportRepo) CategoryTotals(ctx context.Context, year, month int) ([]dom
 	return result, nil
 }
 
-func (r *reportRepo) SubtypeTotals(ctx context.Context, year, month int) (map[string]int64, error) {
+func (r *reportRepo) SubtypeTotals(ctx context.Context, year, month int, accountID *int64) (map[string]int64, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT COALESCE(subtype, 'N/A'), COALESCE(SUM(amount), 0)
 		FROM transactions
 		WHERE EXTRACT(YEAR FROM date) = $1
 		  AND EXTRACT(MONTH FROM date) = $2
 		  AND flow = 'EXPENSE'
+		  AND ($3::bigint IS NULL OR account_id = $3)
 		GROUP BY subtype
-	`, year, month)
+	`, year, month, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -92,16 +96,17 @@ func (r *reportRepo) SubtypeTotals(ctx context.Context, year, month int) (map[st
 	return result, nil
 }
 
-func (r *reportRepo) TopExpenses(ctx context.Context, year, month, limit int) ([]domain.Transaction, error) {
+func (r *reportRepo) TopExpenses(ctx context.Context, year, month, limit int, accountID *int64) ([]domain.Transaction, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, date, description, category, flow, subtype, asset, quantity, amount, notes, source, bank_raw_id, created_at, updated_at
 		FROM transactions
 		WHERE EXTRACT(YEAR FROM date) = $1
 		  AND EXTRACT(MONTH FROM date) = $2
 		  AND flow = 'EXPENSE'
+		  AND ($4::bigint IS NULL OR account_id = $4)
 		ORDER BY amount DESC
 		LIMIT $3
-	`, year, month, limit)
+	`, year, month, limit, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +126,7 @@ func (r *reportRepo) TopExpenses(ctx context.Context, year, month, limit int) ([
 	return txs, nil
 }
 
-func (r *reportRepo) YearlyKPIs(ctx context.Context, year int) (opening, income, expenses, investments, fixed int64, err error) {
+func (r *reportRepo) YearlyKPIs(ctx context.Context, year int, accountID *int64) (opening, income, expenses, investments, fixed int64, err error) {
 	err = r.db.QueryRowContext(ctx, `
 		SELECT
 			COALESCE(SUM(CASE WHEN flow = 'OPENING' THEN amount ELSE 0 END), 0),
@@ -131,11 +136,12 @@ func (r *reportRepo) YearlyKPIs(ctx context.Context, year int) (opening, income,
 			COALESCE(SUM(CASE WHEN flow = 'EXPENSE' AND subtype = 'FIJO' THEN amount ELSE 0 END), 0)
 		FROM transactions
 		WHERE EXTRACT(YEAR FROM date) = $1
-	`, year).Scan(&opening, &income, &expenses, &investments, &fixed)
+		  AND ($2::bigint IS NULL OR account_id = $2)
+	`, year, accountID).Scan(&opening, &income, &expenses, &investments, &fixed)
 	return
 }
 
-func (r *reportRepo) MonthlyTrend(ctx context.Context, year int) ([]domain.MonthlyReport, error) {
+func (r *reportRepo) MonthlyTrend(ctx context.Context, year int, accountID *int64) ([]domain.MonthlyReport, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			EXTRACT(MONTH FROM date)::int,
@@ -143,9 +149,10 @@ func (r *reportRepo) MonthlyTrend(ctx context.Context, year int) ([]domain.Month
 			COALESCE(SUM(CASE WHEN flow = 'EXPENSE' THEN amount ELSE 0 END), 0)
 		FROM transactions
 		WHERE EXTRACT(YEAR FROM date) = $1
+		  AND ($2::bigint IS NULL OR account_id = $2)
 		GROUP BY EXTRACT(MONTH FROM date)
 		ORDER BY 1 ASC
-	`, year)
+	`, year, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -172,8 +179,7 @@ func (r *reportRepo) MonthlyTrend(ctx context.Context, year int) ([]domain.Month
 	return trend, nil
 }
 
-func (r *reportRepo) BudgetVsActual(ctx context.Context, year, month int) ([]domain.CategorySummary, error) {
-	// Collect categories with budgets for this year
+func (r *reportRepo) BudgetVsActual(ctx context.Context, year, month int, accountID *int64) ([]domain.CategorySummary, error) {
 	budgetRows, err := r.db.QueryContext(ctx, `
 		SELECT DISTINCT category FROM budgets WHERE year = $1
 	`, year)
@@ -189,15 +195,15 @@ func (r *reportRepo) BudgetVsActual(ctx context.Context, year, month int) ([]dom
 		budgetCats = append(budgetCats, cat)
 	}
 
-	// Actual expenses by category for the month
 	actualRows, err := r.db.QueryContext(ctx, `
 		SELECT category, COALESCE(SUM(amount), 0), COUNT(*)
 		FROM transactions
 		WHERE EXTRACT(YEAR FROM date) = $1
 		  AND EXTRACT(MONTH FROM date) = $2
 		  AND flow = 'EXPENSE'
+		  AND ($3::bigint IS NULL OR account_id = $3)
 		GROUP BY category
-	`, year, month)
+	`, year, month, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +256,7 @@ func (r *reportRepo) BudgetVsActual(ctx context.Context, year, month int) ([]dom
 	return result, nil
 }
 
-func (r *reportRepo) MonthlyHistory(ctx context.Context, year, beforeMonth int) ([]domain.MonthlyReport, error) {
+func (r *reportRepo) MonthlyHistory(ctx context.Context, year, beforeMonth int, accountID *int64) ([]domain.MonthlyReport, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			EXTRACT(MONTH FROM date)::int,
@@ -259,9 +265,10 @@ func (r *reportRepo) MonthlyHistory(ctx context.Context, year, beforeMonth int) 
 		FROM transactions
 		WHERE EXTRACT(YEAR FROM date) = $1
 		  AND EXTRACT(MONTH FROM date) < $2
+		  AND ($3::bigint IS NULL OR account_id = $3)
 		GROUP BY EXTRACT(MONTH FROM date)
 		ORDER BY 1 ASC
-	`, year, beforeMonth)
+	`, year, beforeMonth, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +286,6 @@ func (r *reportRepo) MonthlyHistory(ctx context.Context, year, beforeMonth int) 
 			m.SavingsRate = float64(m.Income-m.Expenses) / float64(m.Income)
 		}
 
-		// Per-category details for insight rules
 		catRows, err := r.db.QueryContext(ctx, `
 			SELECT
 				t.category,
@@ -294,8 +300,9 @@ func (r *reportRepo) MonthlyHistory(ctx context.Context, year, beforeMonth int) 
 			WHERE EXTRACT(YEAR FROM t.date) = $1
 			  AND EXTRACT(MONTH FROM t.date) = $2
 			  AND t.flow = 'EXPENSE'
+			  AND ($3::bigint IS NULL OR t.account_id = $3)
 			GROUP BY t.category
-		`, year, m.Month)
+		`, year, m.Month, accountID)
 		if err == nil {
 			for catRows.Next() {
 				var cs domain.CategorySummary
@@ -315,7 +322,7 @@ func (r *reportRepo) MonthlyHistory(ctx context.Context, year, beforeMonth int) 
 	return history, nil
 }
 
-func (r *reportRepo) YearlyCategoryTotals(ctx context.Context, year int) ([]domain.CategorySummary, error) {
+func (r *reportRepo) YearlyCategoryTotals(ctx context.Context, year int, accountID *int64) ([]domain.CategorySummary, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			CASE WHEN t.category = 'Nan' THEN 'Sin categoría' ELSE t.category END AS category,
@@ -324,9 +331,10 @@ func (r *reportRepo) YearlyCategoryTotals(ctx context.Context, year int) ([]doma
 		FROM transactions t
 		WHERE EXTRACT(YEAR FROM t.date) = $1
 		  AND t.flow = 'EXPENSE'
+		  AND ($2::bigint IS NULL OR t.account_id = $2)
 		GROUP BY CASE WHEN t.category = 'Nan' THEN 'Sin categoría' ELSE t.category END
 		ORDER BY total DESC
-	`, year)
+	`, year, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -346,15 +354,16 @@ func (r *reportRepo) YearlyCategoryTotals(ctx context.Context, year int) ([]doma
 	return result, rows.Err()
 }
 
-func (r *reportRepo) YearlyTopExpenses(ctx context.Context, year, limit int) ([]domain.Transaction, error) {
+func (r *reportRepo) YearlyTopExpenses(ctx context.Context, year, limit int, accountID *int64) ([]domain.Transaction, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, date, description, category, flow, subtype, asset, quantity, amount, notes, source, bank_raw_id, created_at, updated_at
 		FROM transactions
 		WHERE EXTRACT(YEAR FROM date) = $1
 		  AND flow = 'EXPENSE'
+		  AND ($3::bigint IS NULL OR account_id = $3)
 		ORDER BY amount DESC
 		LIMIT $2
-	`, year, limit)
+	`, year, limit, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -374,7 +383,7 @@ func (r *reportRepo) YearlyTopExpenses(ctx context.Context, year, limit int) ([]
 	return txs, nil
 }
 
-func (r *reportRepo) AllTimeCategoryTotals(ctx context.Context) ([]domain.CategorySummary, error) {
+func (r *reportRepo) AllTimeCategoryTotals(ctx context.Context, accountID *int64) ([]domain.CategorySummary, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			CASE WHEN category = 'Nan' THEN 'Sin categoría' ELSE category END AS category,
@@ -382,9 +391,10 @@ func (r *reportRepo) AllTimeCategoryTotals(ctx context.Context) ([]domain.Catego
 			COUNT(*) AS cnt
 		FROM transactions
 		WHERE flow = 'EXPENSE'
+		  AND ($1::bigint IS NULL OR account_id = $1)
 		GROUP BY CASE WHEN category = 'Nan' THEN 'Sin categoría' ELSE category END
 		ORDER BY total DESC
-	`)
+	`, accountID)
 	if err != nil {
 		return nil, err
 	}

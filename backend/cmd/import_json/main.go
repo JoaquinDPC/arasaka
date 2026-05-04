@@ -13,6 +13,7 @@ import (
 
 	"arasaka/internal/config"
 	"arasaka/internal/importer"
+	"arasaka/internal/logger"
 )
 
 func main() {
@@ -24,6 +25,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: import_json -config=<path/to/config.yml> [movimientos.json]")
 		os.Exit(1)
 	}
+
+	log := logger.New()
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -53,16 +56,23 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Accept both a raw []MovimientoRecord array and an envelope { "movements": [...] }.
 	var records []importer.MovimientoRecord
 	if err := json.Unmarshal(data, &records); err != nil {
-		fmt.Fprintf(os.Stderr, "parse json: %v\n", err)
-		os.Exit(1)
+		var envelope struct {
+			Movements []importer.MovimientoRecord `json:"movements"`
+		}
+		if err2 := json.Unmarshal(data, &envelope); err2 != nil {
+			fmt.Fprintf(os.Stderr, "parse json (array): %v\nparse json (envelope): %v\n", err, err2)
+			os.Exit(1)
+		}
+		records = envelope.Movements
 	}
 
 	fmt.Printf("Loaded %d records from %s\n", len(records), jsonPath)
 
 	ctx := context.Background()
-	result, err := importer.Run(ctx, db, records, time.Time{})
+	result, err := importer.Run(ctx, db, records, time.Time{}, nil, nil, log)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "import: %v\n", err)
 		os.Exit(1)

@@ -17,10 +17,16 @@ func NewSyncController(svc *service.SyncService) *SyncController {
 }
 
 func (c *SyncController) Sync(ctx *gin.Context) {
-	result, err := c.svc.Sync(ctx.Request.Context())
+	var body struct {
+		BankID string `json:"bank_id"`
+	}
+	_ = ctx.ShouldBindJSON(&body)
+
+	result, err := c.svc.Sync(ctx.Request.Context(), body.BankID)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"message": "sync complete", "result": result})
 }
+

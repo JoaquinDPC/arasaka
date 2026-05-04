@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"arasaka/internal/domain"
+	"arasaka/internal/middleware"
 	"arasaka/internal/service"
 )
 
@@ -20,7 +21,8 @@ func NewAccountController(svc *service.AccountService) *AccountController {
 }
 
 func (ctrl *AccountController) List(c *gin.Context) {
-	accounts, err := ctrl.svc.List(c.Request.Context())
+	userID := c.GetInt64(middleware.UserIDKey)
+	accounts, err := ctrl.svc.List(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -29,7 +31,7 @@ func (ctrl *AccountController) List(c *gin.Context) {
 }
 
 type createAccountReq struct {
-	BankName string `json:"bank_name" binding:"required"`
+	BankID string `json:"bank_id" binding:"required"`
 	Name     string `json:"name"      binding:"required"`
 	Type     string `json:"type"`
 	Currency string `json:"currency"`
@@ -42,7 +44,8 @@ func (ctrl *AccountController) Create(c *gin.Context) {
 		return
 	}
 	a, err := ctrl.svc.Create(c.Request.Context(), domain.CreateAccountParams{
-		BankName: req.BankName,
+		UserID:   c.GetInt64(middleware.UserIDKey),
+		BankID: req.BankID,
 		Name:     req.Name,
 		Type:     req.Type,
 		Currency: req.Currency,
@@ -55,7 +58,7 @@ func (ctrl *AccountController) Create(c *gin.Context) {
 }
 
 type updateAccountReq struct {
-	BankName *string `json:"bank_name"`
+	BankID *string `json:"bank_id"`
 	Name     *string `json:"name"`
 	Type     *string `json:"type"`
 }
@@ -72,7 +75,7 @@ func (ctrl *AccountController) Update(c *gin.Context) {
 		return
 	}
 	a, err := ctrl.svc.Update(c.Request.Context(), id, domain.UpdateAccountParams{
-		BankName: req.BankName,
+		BankID: req.BankID,
 		Name:     req.Name,
 		Type:     req.Type,
 	})
