@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react'
 import { api } from '../api/client'
 import { formatCLP, formatDate } from '../lib/formatters'
-import { ACCT_COLORS, BANKS, ACCT_TYPES } from '../lib/constants'
+import { ACCT_COLORS, SUPPORTED_BANKS, ACCT_TYPES, getBankLabel } from '../lib/constants'
 import Spinner from '../components/Spinner'
 
 function AccountModal({ account, onSave, onDelete, onClose }) {
   const [f, setF] = useState({
     name:     account?.name      ?? '',
-    bank_name: account?.bank_name ?? 'BCI',
+    bank_id: account?.bank_id ?? SUPPORTED_BANKS[0]?.id ?? 'banco_de_chile',
     type:     account?.type      ?? 'Cuenta corriente',
     color:    account?.color     ?? ACCT_COLORS[0],
   })
@@ -24,8 +24,8 @@ function AccountModal({ account, onSave, onDelete, onClose }) {
           </div>
           <div className="ff">
             <div className="flbl">Banco</div>
-            <select className="finput" value={f.bank_name} onChange={e => set('bank_name', e.target.value)}>
-              {BANKS.map(b => <option key={b}>{b}</option>)}
+            <select className="finput" value={f.bank_id} onChange={e => set('bank_id', e.target.value)}>
+              {SUPPORTED_BANKS.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
             </select>
           </div>
           <div className="ff">
@@ -114,7 +114,7 @@ export default function Accounts() {
                   <div style={{ width: 10, height: 10, borderRadius: '50%', background: color }} />
                   <span style={{ fontSize: 10, color, padding: '2px 8px', background: color + '18', borderRadius: 4, fontWeight: 700, letterSpacing: '0.04em' }}>{a.type || 'Cuenta'}</span>
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3, fontWeight: 600, letterSpacing: '0.04em' }}>{a.bank_name}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3, fontWeight: 600, letterSpacing: '0.04em' }}>{getBankLabel(a.bank_id)}</div>
                 <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>{a.name}</div>
                 <div style={{ fontFamily: 'var(--mono)', fontSize: 24, fontWeight: 700, color: bal >= 0 ? color : 'var(--red)', lineHeight: 1, marginBottom: 12 }}>
                   {formatCLP(bal)}

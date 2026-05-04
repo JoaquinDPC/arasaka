@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from 'react'
 import { api } from '../api/client'
 import { formatCLP, formatDate } from '../lib/formatters'
-import { getCatColor, CATEGORIES, MONTHS } from '../lib/constants'
+import { getCatColor, MONTHS, getBankLabel } from '../lib/constants'
 import Spinner from '../components/Spinner'
+import CatIcon from '../components/CatIcon'
+import { useAccount } from '../context/AccountContext'
 
 function fmtDate(ds) {
   const d = new Date(ds + 'T12:00')
@@ -34,7 +36,7 @@ function BudgetRow({ cat, spent, budget }) {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <div style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
+          <CatIcon name={cat} size={13} style={{ flexShrink: 0 }} />
           <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.05em' }}>{cat.toUpperCase()}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -61,12 +63,12 @@ function BudgetRow({ cat, spent, budget }) {
 }
 
 function MovDetail({ tx, onClose }) {
-  const tags = (tx.tags?.length ? tx.tags : (tx.category ? [tx.category] : [])).filter(t => CATEGORIES.includes(t))
+  const tags = tx.tags ?? []
   return (
     <div className="overlay fade" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={{ width: 420 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-          <div style={{ width: 10, height: 10, borderRadius: '50%', background: getCatColor(tx.category), flexShrink: 0 }} />
+          <CatIcon name={tx.tags?.[0] ?? tx.category} size={18} style={{ flexShrink: 0 }} />
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 16, fontWeight: 600 }}>{tx.description}</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{formatDate(tx.date)}</div>
@@ -78,7 +80,8 @@ function MovDetail({ tx, onClose }) {
         {tags.length > 0 && (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
             {tags.map(t => (
-              <span key={t} style={{ fontSize: 11, padding: '3px 9px', background: getCatColor(t) + '22', color: getCatColor(t), borderRadius: 5, fontWeight: 700 }}>
+              <span key={t} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, padding: '3px 9px', background: getCatColor(t) + '22', color: getCatColor(t), borderRadius: 5, fontWeight: 700 }}>
+                <CatIcon name={t} size={11} />
                 {t}
               </span>
             ))}
@@ -101,9 +104,10 @@ export default function Home() {
   const now = new Date()
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [year, setYear]   = useState(now.getFullYear())
+  const { selectedId, selectedAccount } = useAccount()
 
   const [kpis, setKpis]       = useState(null)
-  const [budgets, setBudgets] = useState([])
+  const [tagSpend, setTagSpend] = useState([])
   const [recent, setRecent]   = useState([])
   const [loading, setLoading] = useState(true)
   const [selTx, setSelTx]     = useState(null)
@@ -111,19 +115,18 @@ export default function Home() {
   useEffect(() => {
     setLoading(true)
     Promise.all([
-      api.kpis(year),
-      api.budgetVsActual(month, year),
-      api.transactions({ month, year, limit: 30 }),
+      api.kpis(year, selectedId),
+      api.tagSpending({ month, year, ...(selectedId ? { account_id: selectedId } : {}) }),
+      api.transactions({ month, year, limit: 30, account_id: selectedId ?? undefined }),
     ])
-      .then(([kpiData, budgetData, txData]) => {
+      .then(([kpiData, tags, txData]) => {
         setKpis(kpiData)
-        const cats = Array.isArray(budgetData) ? budgetData : (budgetData?.categories ?? [])
-        setBudgets(cats)
+        setTagSpend(Array.isArray(tags) ? tags.filter(t => t.total > 0) : [])
         setRecent(Array.isArray(txData) ? txData : (txData?.transactions ?? []))
       })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [month, year])
+  }, [month, year, selectedId])
 
   function prevMonth() {
     if (month === 1) { setMonth(12); setYear(y => y - 1) }
@@ -141,11 +144,10 @@ export default function Home() {
   const pctInv     = incomeYtd > 0 ? +(investYtd / incomeYtd * 100).toFixed(1) : 0
 
   const topBudgets = useMemo(() =>
-    budgets
-      .filter(b => !['Sueldo', 'Devolucion'].includes(b.category) && (b.total > 0 || b.budget > 0))
-      .sort((a, b) => (b.total ?? 0) - (a.total ?? 0))
+    tagSpend
+      .filter(t => !['Sueldo', 'Devolucion'].includes(t.tag))
       .slice(0, 6)
-  , [budgets])
+  , [tagSpend])
 
   const grouped = useMemo(() => groupByDate(recent), [recent])
 
@@ -154,7 +156,7 @@ export default function Home() {
       {/* ── HERO ── */}
       <div style={{ marginBottom: 28 }}>
         <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', fontWeight: 700, marginBottom: 6 }}>
-          Patrimonio total
+          {selectedAccount ? `${getBankLabel(selectedAccount.bank_id)} · ${selectedAccount.name}` : 'Patrimonio total'}
         </div>
         <div style={{ fontFamily: 'var(--mono)', fontSize: 'clamp(32px,6vw,48px)', fontWeight: 700, letterSpacing: '-0.02em', color: netWorth >= 0 ? 'var(--accent)' : 'var(--red)', lineHeight: 1 }}>
           {formatCLP(netWorth)}
@@ -210,7 +212,7 @@ export default function Home() {
             {topBudgets.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 {topBudgets.map(b => (
-                  <BudgetRow key={b.category} cat={b.category} spent={b.total ?? 0} budget={b.budget ?? 0} />
+                  <BudgetRow key={b.tag} cat={b.tag} spent={b.total ?? 0} budget={0} />
                 ))}
               </div>
             ) : (
@@ -228,8 +230,9 @@ export default function Home() {
                     {fmtDate(g.date)}
                   </div>
                   {g.items.map(tx => {
-                    const color = getCatColor(tx.category)
-                    const tags = (tx.tags?.length ? tx.tags : (tx.category ? [tx.category] : [])).filter(t => CATEGORIES.includes(t))
+                    const iconName = tx.tags?.[0] ?? tx.category
+                    const color = getCatColor(iconName)
+                    const tags = tx.tags ?? []
                     return (
                       <div
                         key={tx.id}
@@ -239,13 +242,14 @@ export default function Home() {
                         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                       >
                         <div style={{ width: 32, height: 32, borderRadius: 7, background: color + '22', border: `1px solid ${color}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                          <div style={{ width: 7, height: 7, borderRadius: '50%', background: color }} />
+                          <CatIcon name={iconName} size={16} />
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tx.description}</div>
                           <div style={{ display: 'flex', gap: 5, marginTop: 2, flexWrap: 'wrap' }}>
                             {tags.slice(0, 3).map(t => (
-                              <span key={t} style={{ fontSize: 9, padding: '1px 6px', background: getCatColor(t) + '22', color: getCatColor(t), borderRadius: 3, fontWeight: 700 }}>
+                              <span key={t} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, padding: '1px 6px', background: getCatColor(t) + '22', color: getCatColor(t), borderRadius: 3, fontWeight: 700 }}>
+                                <CatIcon name={t} size={9} />
                                 {t}
                               </span>
                             ))}

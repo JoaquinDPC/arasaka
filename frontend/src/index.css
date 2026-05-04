@@ -296,7 +296,10 @@ button.fi:focus { border-color: var(--accent); outline: none; }
 /* ── Modal ── */
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: flex; align-items: center; justify-content: center; z-index: 200; backdrop-filter: blur(6px); }
 .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 32px; width: 500px; max-width: 92vw; max-height: 90vh; overflow-y: auto; }
-.modal-ttl { font-size: 17px; font-weight: 600; margin-bottom: 24px; }
+.modal-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+.modal-ttl { font-size: 17px; font-weight: 600; }
+.modal-close { background: none; border: none; color: var(--text-muted); font-size: 16px; cursor: pointer; padding: 2px 6px; border-radius: 6px; line-height: 1; transition: color .15s, background .15s; }
+.modal-close:hover { color: var(--text); background: var(--surface2); }
 .fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 24px; }
 .ff { display: flex; flex-direction: column; gap: 5px; }
 .ff.full { grid-column: 1/-1; }
@@ -351,11 +354,11 @@ button.fi:focus { border-color: var(--accent); outline: none; }
 .login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
 .login-bg { position: absolute; inset: 0; background: radial-gradient(ellipse 60% 50% at 25% 50%, rgba(201,168,76,.07) 0%, transparent 70%), radial-gradient(ellipse 40% 40% at 75% 50%, rgba(201,168,76,.04) 0%, transparent 70%); }
 .login-bg::before { content: ''; position: absolute; inset: 0; background-image: linear-gradient(rgba(201,168,76,.04) 1px,transparent 1px), linear-gradient(90deg,rgba(201,168,76,.04) 1px,transparent 1px); background-size: 56px 56px; }
-.login-card { position: relative; z-index: 1; text-align: center; padding: 72px 96px; }
+.login-card { position: relative; z-index: 1; text-align: center; padding: 72px 96px; width: 100%; max-width: 420px; }
 .login-wordmark { font-size: 56px; font-weight: 700; letter-spacing: .25em; color: var(--accent); line-height: 1; margin-bottom: 10px; }
 .login-line { width: 48px; height: 1px; background: var(--accent); margin: 0 auto 16px; opacity: .5; }
-.login-sub { font-size: 12px; color: var(--text-muted); letter-spacing: .14em; text-transform: uppercase; margin-bottom: 56px; }
-.login-btn { display: inline-flex; align-items: center; gap: 12px; padding: 14px 36px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; font-family: var(--font); cursor: pointer; transition: all var(--t); }
+.login-sub { font-size: 12px; color: var(--text-muted); letter-spacing: .14em; text-transform: uppercase; margin-bottom: 32px; }
+.login-btn { display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; padding: 14px 36px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; font-family: var(--font); cursor: pointer; transition: all var(--t); }
 .login-btn:hover { border-color: var(--accent); color: var(--accent); }
 .login-btn:disabled { opacity: .5; cursor: default; }
 

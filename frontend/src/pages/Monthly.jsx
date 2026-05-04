@@ -5,6 +5,8 @@ import { api } from '../api/client'
 import { formatCLP } from '../lib/formatters'
 import { getCatColor, MONTHS } from '../lib/constants'
 import Spinner from '../components/Spinner'
+import CatIcon from '../components/CatIcon'
+import { useAccount } from '../context/AccountContext'
 
 function Ring({ value, max = 100, label, size = 130 }) {
   const r = 48, circ = 2 * Math.PI * r
@@ -29,12 +31,11 @@ function BudgetBar({ cat, spent, budget }) {
   const p = budget > 0 ? Math.min(spent / budget * 100, 100) : 0
   const over = budget > 0 && spent > budget
   const bar = over ? 'var(--red)' : p > 80 ? '#d4884c' : 'var(--accent)'
-  const color = getCatColor(cat)
   return (
     <div className="bud-item">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <div style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
+          <CatIcon name={cat} size={13} style={{ flexShrink: 0 }} />
           <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.05em' }}>{cat.toUpperCase()}</span>
         </div>
         <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: over ? 'var(--red)' : 'var(--text-muted)' }}>
@@ -63,29 +64,33 @@ function ChartTooltip({ active, payload, label }) {
 export default function Monthly() {
   const now = new Date()
   const navigate = useNavigate()
+  const { selectedId } = useAccount()
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [year, setYear]   = useState(now.getFullYear())
-  const [monthly, setMonthly] = useState(null)
-  const [kpis, setKpis]       = useState(null)
-  const [budgets, setBudgets] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [monthly, setMonthly]   = useState(null)
+  const [kpis, setKpis]         = useState(null)
+  const [budgets, setBudgets]   = useState([])
+  const [tagData, setTagData]   = useState([])
+  const [loading, setLoading]   = useState(true)
 
   useEffect(() => {
     setLoading(true)
     Promise.all([
-      api.monthly(month, year),
-      api.kpis(year),
-      api.budgetVsActual(month, year),
+      api.monthly(month, year, selectedId),
+      api.kpis(year, selectedId),
+      api.budgetVsActual(month, year, selectedId),
+      api.tagSpending({ month, year, ...(selectedId ? { account_id: selectedId } : {}) }),
     ])
-      .then(([mon, kpiData, budgetData]) => {
+      .then(([mon, kpiData, budgetData, tags]) => {
         setMonthly(mon)
         setKpis(kpiData)
         const cats = Array.isArray(budgetData) ? budgetData : (budgetData?.categories ?? [])
         setBudgets(cats)
+        setTagData(Array.isArray(tags) ? tags.filter(t => t.total > 0) : [])
       })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [month, year])
+  }, [month, year, selectedId])
 
   function prevMonth() {
     if (month === 1) { setMonth(12); setYear(y => y - 1) }
@@ -106,9 +111,9 @@ export default function Monthly() {
   const pctAhorro = income > 0 ? +(Math.max(balance, 0) / income * 100).toFixed(1) : 0
   const pctInv    = income > 0 ? +(investments / income * 100).toFixed(1) : 0
 
-  const catData = budgets.filter(b => b.total > 0).sort((a, b) => b.total - a.total)
+  const catData = tagData.slice().sort((a, b) => b.total - a.total)
   const budgetCats = budgets
-    .filter(b => !['Sueldo', 'Devolucion'].includes(b.category))
+    .filter(b => !['sueldo', 'devolucion'].includes(b.category))
     .sort((a, b) => (b.total ?? 0) - (a.total ?? 0))
 
   return (
@@ -154,17 +159,17 @@ export default function Monthly() {
             </div>
 
             <div className="card">
-              <div className="card-title">Gastos por categoría</div>
+              <div className="card-title">Gastos por Tag</div>
               {catData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={Math.max(catData.length * 28, 100)}>
                   <BarChart data={catData} layout="vertical" barSize={10} margin={{ left: 60, right: 30, top: 0, bottom: 0 }}>
                     <XAxis type="number" hide />
-                    <YAxis type="category" dataKey="category"
+                    <YAxis type="category" dataKey="tag"
                       tick={{ fill: 'var(--text-muted)', fontSize: 11, fontFamily: 'Space Grotesk' }}
                       axisLine={false} tickLine={false} width={60} />
                     <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
                     <Bar dataKey="total" radius={[0, 4, 4, 0]} name="Gasto">
-                      {catData.map(d => <Cell key={d.category} fill={getCatColor(d.category)} />)}
+                      {catData.map(d => <Cell key={d.tag} fill={getCatColor(d.tag)} />)}
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>

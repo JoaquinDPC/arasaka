@@ -2,8 +2,10 @@ import { useState, useEffect, useMemo } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { api } from '../api/client'
 import { formatCLP } from '../lib/formatters'
-import { getCatColor, MONTH_ABBR } from '../lib/constants'
+import { MONTH_ABBR } from '../lib/constants'
 import Spinner from '../components/Spinner'
+import CatIcon from '../components/CatIcon'
+import { useAccount } from '../context/AccountContext'
 
 function InsightRow({ icon, label, value, sub, good }) {
   return (
@@ -41,14 +43,15 @@ function ChartTooltip({ active, payload, label }) {
 }
 
 export default function Annual() {
+  const { selectedId } = useAccount()
   const [year, setYear]       = useState(new Date().getFullYear())
   const [data, setData]       = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
-    api.annual(year).then(setData).catch(() => {}).finally(() => setLoading(false))
-  }, [year])
+    api.annual(year, selectedId).then(setData).catch(() => {}).finally(() => setLoading(false))
+  }, [year, selectedId])
 
   const chartData = useMemo(() => {
     const trendMap = Object.fromEntries((data?.monthly_trend ?? []).map(m => [m.month, m]))
@@ -132,7 +135,7 @@ export default function Annual() {
                     <li key={i} className="top-item" style={{ padding: '3px 0' }}>
                       <div className="top-left">
                         <span style={{ width: 18, fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--mono)', textAlign: 'right', flexShrink: 0 }}>{i + 1}.</span>
-                        <div className="dot" style={{ background: getCatColor(t.category) }} />
+                        <CatIcon name={t.category} size={14} style={{ flexShrink: 0 }} />
                         <div>
                           <div className="top-desc">{t.description ?? t.desc ?? '—'}</div>
                           <div className="top-cat">{t.date?.slice(0, 10)} · {t.category}</div>

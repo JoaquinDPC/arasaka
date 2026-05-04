@@ -1,31 +1,45 @@
 export const CAT_COLORS = {
-  Casa:          '#c9a84c',
-  Personal:      '#9b7fd4',
-  Salud:         '#4caf7d',
-  Inversion:     '#4cb8af',
-  Patrimonio:    '#af4c8a',
-  Transporte:    '#d4884c',
-  Suscripciones: '#80af4c',
-  Gustos:        '#e07c5c',
-  Otros:         '#888888',
-  Sueldo:        '#50b87a',
-  Devolucion:    '#4cb8af',
-  Mascota:       '#c9784c',
-  Regalo:        '#c94c8a',
-  Seguros:       '#7c9faf',
-  Vacaciones:    '#afb04c',
+  casa:          '#c9a84c',
+  personal:      '#9b7fd4',
+  salud:         '#4caf7d',
+  inversion:     '#4cb8af',
+  patrimonio:    '#af4c8a',
+  transporte:    '#d4884c',
+  suscripciones: '#80af4c',
+  gustos:        '#e07c5c',
+  otros:         '#888888',
+  sueldo:        '#50b87a',
+  devolucion:    '#4cb8af',
+  mascota:       '#c9784c',
+  regalo:        '#c94c8a',
+  seguros:       '#7c9faf',
+  vacaciones:    '#afb04c',
 }
 
-export const CATEGORIES = Object.keys(CAT_COLORS)
+const HASH_PALETTE = [
+  '#e07c5c', '#4caf7d', '#4cb8af', '#9b7fd4', '#d4884c',
+  '#80af4c', '#c9a84c', '#af4c8a', '#7c9faf', '#c94c8a',
+  '#afb04c', '#4c7caf', '#af7c4c', '#7caf4c', '#af4c7c',
+  '#4caf9b', '#a04caf', '#af4c4c', '#4c9baf', '#8caf4c',
+]
+
+export function hashString(s) {
+  let hash = 0
+  if (!s) return 0
+  for (let i = 0; i < s.length; i++) {
+    hash = s.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  return Math.abs(hash)
+}
 
 export function getCatColor(cat) {
   if (!cat) return '#888888'
   if (CAT_COLORS[cat]) return CAT_COLORS[cat]
-  let hash = 0
-  for (let i = 0; i < cat.length; i++) {
-    hash = cat.charCodeAt(i) + ((hash << 5) - hash)
+  const lower = cat.toLowerCase()
+  for (const [k, v] of Object.entries(CAT_COLORS)) {
+    if (k.toLowerCase() === lower) return v
   }
-  return `hsl(${Math.abs(hash) % 360}, 52%, 54%)`
+  return HASH_PALETTE[hashString(cat) % HASH_PALETTE.length]
 }
 
 // Backward compat alias used by some components
@@ -43,9 +57,9 @@ export const FLOW_TYPES = [
   { value: 'OPENING', label: 'Saldo inicial' },
 ]
 
-export const LIFE_CATS    = ['Casa', 'Personal', 'Salud', 'Transporte', 'Suscripciones', 'Mascota', 'Seguros', 'Otros']
-export const INV_CATS     = ['Inversion', 'Patrimonio']
-export const INCOME_CATS  = ['Sueldo', 'Devolucion']
+export const LIFE_CATS    = ['casa', 'personal', 'salud', 'transporte', 'suscripciones', 'mascota', 'seguros', 'otros']
+export const INV_CATS     = ['inversion', 'patrimonio']
+export const INCOME_CATS  = ['sueldo', 'devolucion']
 
 export const MONTHS = [
   'Enero','Febrero','Marzo','Abril','Mayo','Junio',
@@ -55,9 +69,27 @@ export const MONTHS = [
 export const MONTH_ABBR = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
 
 export const BANKS = [
-  'BCI','Banco de Chile','Santander','BancoEstado','Scotiabank',
-  'Itaú','BICE','Falabella','Ripley','Mercado Pago','Otro',
+  { id: 'banco_de_chile', label: 'Banco de Chile' },
+  { id: 'santander',      label: 'Santander'      },
+  { id: 'bci',           label: 'BCI'            },
+  { id: 'banco_estado',  label: 'BancoEstado'    },
+  { id: 'scotiabank',    label: 'Scotiabank'      },
+  { id: 'itau',          label: 'Itaú'            },
+  { id: 'bice',          label: 'BICE'            },
+  { id: 'falabella',     label: 'Falabella'       },
+  { id: 'ripley',        label: 'Ripley'          },
+  { id: 'mercado_pago',  label: 'Mercado Pago'   },
+  { id: 'otro',          label: 'Otro'            },
 ]
+
+// Banks that have a PDF cartola importer. Used in account create/edit and the import page.
+export const SUPPORTED_BANKS = BANKS.filter(b =>
+  b.id === 'banco_de_chile' || b.id === 'santander'
+)
+
+export function getBankLabel(bankId) {
+  return BANKS.find(b => b.id === bankId)?.label ?? bankId ?? '—'
+}
 export const ACCT_TYPES = [
   'Cuenta corriente','Cuenta de ahorro','Tarjeta de crédito',
   'Cuenta vista','Inversión','Otro',

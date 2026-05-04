@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { AccountProvider } from './context/AccountContext'
 import Layout from './components/Layout'
 import Login from './components/Login'
 import Home from './pages/Home'
@@ -10,6 +11,7 @@ import Ledger from './pages/Ledger'
 import Accounts from './pages/Accounts'
 import Budgets from './pages/Budgets'
 import Debts from './pages/Debts'
+import Import from './pages/Import'
 
 function getUser() {
   try { return JSON.parse(localStorage.getItem('arasaka_user')) } catch { return null }
@@ -18,21 +20,31 @@ function getUser() {
 export default function App() {
   const [user, setUser] = useState(() => getUser())
 
-  function handleLogin(u) {
+  const handleLogout = useCallback(() => {
+    localStorage.removeItem('arasaka_user')
+    localStorage.removeItem('arasaka_token')
+    setUser(null)
+  }, [])
+
+  // Auto-logout when any API call receives a 401
+  useEffect(() => {
+    window.addEventListener('arasaka:unauthorized', handleLogout)
+    return () => window.removeEventListener('arasaka:unauthorized', handleLogout)
+  }, [handleLogout])
+
+  function handleLogin({ token, user: u }) {
+    localStorage.setItem('arasaka_token', token)
     localStorage.setItem('arasaka_user', JSON.stringify(u))
     setUser(u)
-  }
-  function handleLogout() {
-    localStorage.removeItem('arasaka_user')
-    setUser(null)
   }
 
   if (!user) return <Login onLogin={handleLogin} />
 
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Layout user={user} onLogout={handleLogout} />}>
+      <AccountProvider>
+        <Routes>
+          <Route path="/" element={<Layout user={user} onLogout={handleLogout} />}>
           <Route index element={<Navigate to="/home" replace />} />
           <Route path="home"         element={<Home />}       />
           <Route path="mensual"      element={<Monthly />}    />
@@ -42,8 +54,10 @@ export default function App() {
           <Route path="cuentas"      element={<Accounts />}   />
           <Route path="deudas"       element={<Debts />}      />
           <Route path="presupuestos" element={<Budgets />}    />
-        </Route>
-      </Routes>
+          <Route path="importar"     element={<Import />}     />
+          </Route>
+        </Routes>
+      </AccountProvider>
     </BrowserRouter>
   )
 }
