@@ -22,16 +22,18 @@ type SyncService struct {
 	bancochilePassword string
 	santanderUser      string
 	santanderPassword  string
+	inferenceSvc       *TagInferenceService
 	logger             *slog.Logger
 }
 
-func NewSyncService(db *sql.DB, bancochileUser, bancochilePassword, santanderUser, santanderPassword string, logger *slog.Logger) *SyncService {
+func NewSyncService(db *sql.DB, bancochileUser, bancochilePassword, santanderUser, santanderPassword string, inferenceSvc *TagInferenceService, logger *slog.Logger) *SyncService {
 	return &SyncService{
 		db:                 db,
 		bancochileUser:     bancochileUser,
 		bancochilePassword: bancochilePassword,
 		santanderUser:      santanderUser,
 		santanderPassword:  santanderPassword,
+		inferenceSvc:       inferenceSvc,
 		logger:             logger,
 	}
 }
@@ -107,18 +109,6 @@ func (s *SyncService) syncBank(ctx context.Context, bankID, user, password, dbBa
 		return importer.Result{}, fmt.Errorf("parse fintself output: %w", err)
 	}
 
-	now := time.Now()
-	var records []importer.MovimientoRecord
-	for _, r := range all {
-		d, err := importer.ParseDate(r.Date)
-		if err != nil {
-			continue
-		}
-		if d.Year() == now.Year() && d.Month() == now.Month() {
-			records = append(records, r)
-		}
-	}
-
 	var accountID *int64
 	var userID *int64
 	var acctID int64
@@ -145,7 +135,7 @@ func (s *SyncService) syncBank(ctx context.Context, bankID, user, password, dbBa
 		}
 	}
 
-	result, err := importer.Run(ctx, s.db, records, fromDate, accountID, userID, s.logger)
+	result, err := importer.Run(ctx, s.db, all, fromDate, accountID, userID, s.inferenceSvc, dbBankID, s.logger)
 
 	// Retroactively link corriente movements that were imported before the account
 	// existed in the database (account_id IS NULL). Uses all fetched movements —

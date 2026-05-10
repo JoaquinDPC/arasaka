@@ -17,6 +17,7 @@ type Controllers struct {
 	Insights     *controller.InsightController
 	Sync         *controller.SyncController
 	Import       *controller.ImportController
+	Inference    *controller.InferenceController
 }
 
 func registerRoutes(r *gin.Engine, ctrl Controllers, jwtSecret string) {
@@ -56,6 +57,7 @@ func registerRoutes(r *gin.Engine, ctrl Controllers, jwtSecret string) {
 	api.GET("/tags/personal", ctrl.Budgets.ListPersonalTags)
 	api.POST("/tags/personal", ctrl.Budgets.SavePersonalTag)
 	api.PUT("/tags/personal/:tag/icon", ctrl.Budgets.SetTagIcon)
+	api.DELETE("/tags/personal/:tag", ctrl.Budgets.DeletePersonalTag)
 
 	// ── Tag Budgets ────────────────────────────────────────────────────────────
 	api.GET("/tag-budgets", ctrl.Budgets.ListTagBudgets)
@@ -69,4 +71,8 @@ func registerRoutes(r *gin.Engine, ctrl Controllers, jwtSecret string) {
 
 	// ── PDF Import ─────────────────────────────────────────────────────────────
 	api.POST("/import/pdf", ctrl.Import.ImportPDF)
+
+	// ── Tag Inference ──────────────────────────────────────────────────────────
+	api.POST("/tags/infer", ctrl.Inference.Infer)
+	api.PUT("/users/settings", ctrl.Inference.UpdateSettings)
 }

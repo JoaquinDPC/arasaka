@@ -45,12 +45,13 @@ type BatchResult struct {
 
 // ImportService handles PDF cartola imports.
 type ImportService struct {
-	db *sql.DB
+	db           *sql.DB
+	inferenceSvc *TagInferenceService
 }
 
 // NewImportService creates a new ImportService.
-func NewImportService(db *sql.DB) *ImportService {
-	return &ImportService{db: db}
+func NewImportService(db *sql.DB, inferenceSvc *TagInferenceService) *ImportService {
+	return &ImportService{db: db, inferenceSvc: inferenceSvc}
 }
 
 // ImportPDFs validates ownership and bank support once, then processes each PDF
@@ -128,6 +129,11 @@ func (s *ImportService) importOne(
 			AccountID:   &aid,
 			UserID:      &uid,
 		})
+	}
+
+	// ── Apply app-level tag inference before insert ───────────────────────────
+	if s.inferenceSvc != nil {
+		params = s.inferenceSvc.AutoTagBatch(ctx, userID, params)
 	}
 
 	// ── Insert (dedup-safe via ON CONFLICT transactions_dedup) ────────────────

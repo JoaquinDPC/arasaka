@@ -19,9 +19,9 @@ func NewUserRepository(db *sql.DB) domain.UserRepository {
 func (r *userRepo) GetByEmail(ctx context.Context, email string) (domain.User, error) {
 	var u domain.User
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, email, password_hash, created_at, updated_at FROM users WHERE email = $1`,
+		`SELECT id, email, password_hash, settings, created_at, updated_at FROM users WHERE email = $1`,
 		email,
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Settings, &u.CreatedAt, &u.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return domain.User{}, fmt.Errorf("not found")
 	}
@@ -31,9 +31,9 @@ func (r *userRepo) GetByEmail(ctx context.Context, email string) (domain.User, e
 func (r *userRepo) GetByID(ctx context.Context, id int64) (domain.User, error) {
 	var u domain.User
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, email, password_hash, created_at, updated_at FROM users WHERE id = $1`,
+		`SELECT id, email, password_hash, settings, created_at, updated_at FROM users WHERE id = $1`,
 		id,
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Settings, &u.CreatedAt, &u.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return domain.User{}, fmt.Errorf("not found")
 	}
@@ -44,8 +44,20 @@ func (r *userRepo) Create(ctx context.Context, email, passwordHash string) (doma
 	var u domain.User
 	err := r.db.QueryRowContext(ctx,
 		`INSERT INTO users (email, password_hash) VALUES ($1, $2)
-		 RETURNING id, email, password_hash, created_at, updated_at`,
+		 RETURNING id, email, password_hash, settings, created_at, updated_at`,
 		email, passwordHash,
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Settings, &u.CreatedAt, &u.UpdatedAt)
 	return u, err
+}
+
+func (r *userRepo) UpdateSettings(ctx context.Context, userID int64, s domain.UserSettings) error {
+	v, err := s.Value()
+	if err != nil {
+		return err
+	}
+	_, err = r.db.ExecContext(ctx,
+		`UPDATE users SET settings = $2, updated_at = NOW() WHERE id = $1`,
+		userID, v,
+	)
+	return err
 }

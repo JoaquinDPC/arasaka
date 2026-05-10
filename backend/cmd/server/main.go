@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	ginSwagger "github.com/swaggo/gin-swagger"
 	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 
 	_ "arasaka/docs"
 	"arasaka/internal/config"
@@ -55,7 +55,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// ── Repositories ──────────────────────────────────────────────────────────
+	// ── Repositories (db connections) ──────────────────────────────────────────────────────────
 	userRepo := repository.NewUserRepository(db)
 	accountRepo := repository.NewAccountRepository(db)
 	txRepo := repository.NewTransactionRepository(db)
@@ -63,17 +63,20 @@ func main() {
 	userTagRepo := repository.NewUserTagRepository(db)
 	tagBudgetRepo := repository.NewTagBudgetRepository(db)
 	reportRepo := repository.NewReportRepository(db)
+	appTagRuleRepo := repository.NewAppTagRuleRepository(db)
+	tagHistoryRepo := repository.NewUserTagHistoryRepository(db)
 
-	// ── Services ──────────────────────────────────────────────────────────────
+	// ── Services (business logic) ──────────────────────────────────────────────────────────
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
 	accountSvc := service.NewAccountService(accountRepo)
 	budgetSvc := service.NewBudgetService(budgetRepo, userTagRepo, tagBudgetRepo)
-	txSvc := service.NewTransactionService(txRepo, budgetRepo, userTagRepo)
+	inferenceSvc := service.NewTagInferenceService(appTagRuleRepo, tagHistoryRepo, userRepo)
+	txSvc := service.NewTransactionService(txRepo, budgetRepo, userTagRepo, inferenceSvc)
 	reportSvc := service.NewReportService(reportRepo)
-	syncSvc := service.NewSyncService(db, cfg.BancochileUser, cfg.BancochilePassword, cfg.SantanderUser, cfg.SantanderPassword, log)
-	importSvc := service.NewImportService(db)
+	syncSvc := service.NewSyncService(db, cfg.BancochileUser, cfg.BancochilePassword, cfg.SantanderUser, cfg.SantanderPassword, inferenceSvc, log)
+	importSvc := service.NewImportService(db, inferenceSvc)
 
-	// ── Controllers ───────────────────────────────────────────────────────────
+	// ── Controllers (HTTP handlers) ──────────────────────────────────────────────────────────
 	ctrl := Controllers{
 		Auth:         controller.NewAuthController(authSvc),
 		Accounts:     controller.NewAccountController(accountSvc),
@@ -83,6 +86,7 @@ func main() {
 		Insights:     controller.NewInsightController(reportSvc),
 		Sync:         controller.NewSyncController(syncSvc),
 		Import:       controller.NewImportController(importSvc),
+		Inference:    controller.NewInferenceController(inferenceSvc, userRepo),
 	}
 
 	gin.SetMode(gin.ReleaseMode)

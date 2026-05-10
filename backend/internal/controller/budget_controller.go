@@ -80,6 +80,20 @@ func (ctrl *BudgetController) SetTagIcon(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// DeletePersonalTag removes a tag from the user's personal vocabulary.
+func (ctrl *BudgetController) DeletePersonalTag(c *gin.Context) {
+	tag := c.Param("tag")
+	if tag == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tag required"})
+		return
+	}
+	if err := ctrl.svc.DeleteUserTag(c.Request.Context(), userIDFromContext(c), tag); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // ListTagBudgets returns per-tag spending limits for the authenticated user.
 func (ctrl *BudgetController) ListTagBudgets(c *gin.Context) {
 	year, err := strconv.Atoi(c.Query("year"))

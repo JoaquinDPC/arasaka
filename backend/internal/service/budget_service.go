@@ -53,6 +53,10 @@ func (s *BudgetService) SetTagIcon(ctx context.Context, userID int64, tag, icon 
 	return s.userTags.SetIcon(ctx, userID, tag, icon)
 }
 
+func (s *BudgetService) DeleteUserTag(ctx context.Context, userID int64, tag string) error {
+	return s.userTags.Delete(ctx, userID, tag)
+}
+
 func (s *BudgetService) ListTagBudgets(ctx context.Context, userID int64, year int) ([]domain.TagBudget, error) {
 	return s.tagBudgets.List(ctx, userID, year)
 }

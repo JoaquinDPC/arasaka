@@ -1,3 +1,8 @@
+// Package domain defines the core business interfaces (ports) for the
+// hexagonal architecture. Each interface here is an outbound port: a contract
+// the domain requires from the outside world (database, external services, etc.)
+// without knowing the concrete implementation. The actual implementations
+// (adapters) live in internal/repository/.
 package domain
 
 import "context"
@@ -7,6 +12,7 @@ type UserRepository interface {
 	GetByEmail(ctx context.Context, email string) (User, error)
 	GetByID(ctx context.Context, id int64) (User, error)
 	Create(ctx context.Context, email, passwordHash string) (User, error)
+	UpdateSettings(ctx context.Context, userID int64, s UserSettings) error
 }
 
 // AccountRepository is the port for account persistence.
@@ -49,6 +55,8 @@ type UserTagRepository interface {
 	Upsert(ctx context.Context, userID int64, tag string) error
 	// SetIcon sets or clears the icon override for a tag (empty string clears it).
 	SetIcon(ctx context.Context, userID int64, tag, icon string) error
+	// Delete removes a tag from the user's personal vocabulary.
+	Delete(ctx context.Context, userID int64, tag string) error
 }
 
 // TagBudgetRepository is the port for per-tag spending limits.
@@ -64,6 +72,21 @@ type CreditCardRepository interface {
 	UpdateStatementTotal(ctx context.Context, id int64, total int64) error
 	ListStatements(ctx context.Context) ([]CreditCardStatement, error)
 	GetStatementByID(ctx context.Context, id int64) (CreditCardStatement, error)
+}
+
+// AppTagRuleRepository is the port for global description-to-tag inference rules.
+type AppTagRuleRepository interface {
+	// MatchDescription returns rules whose pattern is a substring of normalizedDesc.
+	MatchDescription(ctx context.Context, normalizedDesc string) ([]AppTagRule, error)
+}
+
+// UserTagHistoryRepository is the port for behavioral tag and key_user learning per user.
+type UserTagHistoryRepository interface {
+	// Upsert records or updates a description-to-tag and description-to-key_user mapping, incrementing use_count.
+	// keyUser nil leaves any existing key_user value unchanged.
+	Upsert(ctx context.Context, userID int64, descriptionKey string, tags []string, keyUser *string) error
+	// Match returns the history entry for an exact description_key, or nil if not found.
+	Match(ctx context.Context, userID int64, descriptionKey string) (*UserTagHistory, error)
 }
 
 // ReportRepository is the port for complex read-only aggregations.

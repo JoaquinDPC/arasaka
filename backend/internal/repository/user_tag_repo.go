@@ -70,3 +70,10 @@ func (r *userTagRepo) SetIcon(ctx context.Context, userID int64, tag, icon strin
 		iconVal, userID, tag)
 	return err
 }
+
+func (r *userTagRepo) Delete(ctx context.Context, userID int64, tag string) error {
+	_, err := r.db.ExecContext(ctx,
+		`DELETE FROM user_tags WHERE user_id = $1 AND tag = $2`,
+		userID, tag)
+	return err
+}

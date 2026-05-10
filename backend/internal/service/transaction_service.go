@@ -10,13 +10,14 @@ import (
 
 // TransactionService handles business logic for transactions.
 type TransactionService struct {
-	repo        domain.TransactionRepository
-	budgetRepo  domain.BudgetRepository
-	userTagRepo domain.UserTagRepository
+	repo         domain.TransactionRepository
+	budgetRepo   domain.BudgetRepository
+	userTagRepo  domain.UserTagRepository
+	inferenceSvc *TagInferenceService
 }
 
-func NewTransactionService(repo domain.TransactionRepository, budgetRepo domain.BudgetRepository, userTagRepo domain.UserTagRepository) *TransactionService {
-	return &TransactionService{repo: repo, budgetRepo: budgetRepo, userTagRepo: userTagRepo}
+func NewTransactionService(repo domain.TransactionRepository, budgetRepo domain.BudgetRepository, userTagRepo domain.UserTagRepository, inferenceSvc *TagInferenceService) *TransactionService {
+	return &TransactionService{repo: repo, budgetRepo: budgetRepo, userTagRepo: userTagRepo, inferenceSvc: inferenceSvc}
 }
 
 // splitCamelCase inserts "-" before each uppercase letter preceded by a lowercase letter.
@@ -118,6 +119,9 @@ func (s *TransactionService) Create(ctx context.Context, p domain.CreateTransact
 		return t, err
 	}
 	s.upsertTags(ctx, t.UserID, t.Tags)
+	if s.inferenceSvc != nil && p.UserID != nil {
+		s.inferenceSvc.RecordTagAssignment(ctx, *p.UserID, p.Description, t.Tags, p.KeyUser, p.Source)
+	}
 	return t, nil
 }
 
@@ -134,6 +138,9 @@ func (s *TransactionService) Update(ctx context.Context, id int64, p domain.Upda
 	}
 	if p.Tags != nil {
 		s.upsertTags(ctx, t.UserID, t.Tags)
+	}
+	if s.inferenceSvc != nil && t.UserID != nil && (len(t.Tags) > 0 || p.KeyUser != nil) {
+		s.inferenceSvc.RecordTagAssignment(ctx, *t.UserID, t.Description, t.Tags, t.KeyUser, "manual")
 	}
 	return t, nil
 }
