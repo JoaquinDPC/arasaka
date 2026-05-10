@@ -98,6 +98,7 @@ export const api = {
   savePersonalTag:   (tag)         => post('/tags/personal', { tag }),
   tagSpending:       (params = {}) => get(`/tags/spending${qs(params)}`),
   setTagIcon:        (tag, icon)   => put(`/tags/personal/${encodeURIComponent(tag)}/icon`, { icon }),
+  deletePersonalTag: (tag)         => del(`/tags/personal/${encodeURIComponent(tag)}`),
 
   // Tag budgets
   tagBudgets:      (year)  => get(`/tag-budgets?year=${year}`),
@@ -107,6 +108,10 @@ export const api = {
   budgets:           (year) => get(`/budgets?year=${year}`),
   upsertBudget:      (body) => put('/budgets', body),
   upsertBudgetsBase: (body) => put('/budgets/base', body),
+
+  // Tag inference
+  inferTags:          (description) => post('/tags/infer', { description }),
+  updateUserSettings: (body)        => put('/users/settings', body),
 
   // Sync — bankId is optional; omit to sync all configured banks
   sync:            (bankId) => post('/sync', bankId ? { bank_id: bankId } : {}),

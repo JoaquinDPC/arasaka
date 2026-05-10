@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, memo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { formatCLP, formatDate } from '../lib/formatters'
@@ -16,23 +16,32 @@ import { useAccount } from '../context/AccountContext'
 function tagEq(a, b) { return a.toLowerCase() === b.toLowerCase() }
 function isSelected(selected, tag) { return selected.some(t => tagEq(t, tag)) }
 
+// Module-level cache for inference results to avoid redundant API calls
+const inferCache = new Map()
+
 // TagPicker lets the user select from top-used tags (chips) and type free-form tags.
-// usedTags:   string[] top-used tags from transactions (shown as chips)
-// recognized: string[] budget categories (used for autocomplete suggestions)
-// selected:   string[] currently chosen tags
-// onChange:   (string[]) => void
-function TagPicker({ selected, onChange, usedTags, recognized }) {
+// usedTags:             string[] top-used tags from transactions (shown as chips)
+// recognized:           string[] budget categories (used for autocomplete suggestions)
+// selected:             string[] currently chosen tags
+// onChange:             (string[]) => void
+// inferenceSuggestions: [{tag, source}] from the inference API
+const TagPicker = memo(function TagPicker({ selected, onChange, usedTags, recognized, inferenceSuggestions = [] }) {
   const [input, setInput] = useState('')
 
   const trimmed = input.trim()
   const trimmedLower = trimmed.toLowerCase()
 
-  // Autocomplete pool: union of recognized + usedTags, deduped (case-insensitive)
-  const pool = [...recognized, ...usedTags.filter(u => !recognized.some(r => tagEq(r, u)))]
+  const pool = useMemo(
+    () => [...recognized, ...usedTags.filter(u => !recognized.some(r => tagEq(r, u)))],
+    [recognized, usedTags]
+  )
 
-  const suggestions = trimmedLower.length > 0
-    ? pool.filter(r => r.toLowerCase().includes(trimmedLower) && !isSelected(selected, r))
-    : []
+  const suggestions = useMemo(
+    () => trimmedLower.length > 0
+      ? pool.filter(r => r.toLowerCase().includes(trimmedLower) && !isSelected(selected, r))
+      : [],
+    [pool, trimmedLower, selected]
+  )
 
   const isDuplicate = trimmedLower.length > 0 && isSelected(selected, trimmedLower)
 
@@ -79,8 +88,34 @@ function TagPicker({ selected, onChange, usedTags, recognized }) {
   const chipTags = usedTags
   const extraSelected = selected.filter(s => !usedTags.some(u => tagEq(u, s)))
 
+  const visibleInference = inferenceSuggestions.filter(s => !isSelected(selected, s.tag))
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {/* Inference suggestion chips */}
+      {visibleInference.length > 0 && (
+        <div>
+          <div style={{ fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.08em', marginBottom: 4, fontWeight: 700 }}>SUGERENCIAS</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+            {visibleInference.map(s => {
+              const color = getCatColor(s.tag)
+              return (
+                <div key={s.tag}
+                  onClick={() => addTag(s.tag)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                    fontSize: 11, padding: '4px 10px', borderRadius: 5, cursor: 'pointer',
+                    fontWeight: 700, letterSpacing: '0.04em',
+                    background: 'transparent', color,
+                    border: `1px dashed ${color}88`,
+                  }}>
+                  ✦ {s.tag}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
       {/* Most-used tag chips */}
       {chipTags.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
@@ -165,7 +200,7 @@ function TagPicker({ selected, onChange, usedTags, recognized }) {
       )}
     </div>
   )
-}
+})
 
 function AddModal({ onClose, onSaved, currentSaldo, accountId, recognizedTags, usedTags }) {
   const now = new Date()
@@ -180,7 +215,32 @@ function AddModal({ onClose, onSaved, currentSaldo, accountId, recognizedTags, u
   })
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState(null)
-  const set = (k, v) => setF(p => ({ ...p, [k]: v }))
+  const [inferenceSuggestions, setInferenceSuggestions] = useState([])
+  const set = useCallback((k, v) => setF(p => ({ ...p, [k]: v })), [])
+  const onChangeTags = useCallback(v => setF(p => ({ ...p, tags: v })), [])
+
+  useEffect(() => {
+    const desc = f.description.trim()
+    if (!desc) { setInferenceSuggestions([]); return }
+    try {
+      const user = JSON.parse(localStorage.getItem('arasaka_user'))
+      if (user?.settings?.inference_enabled === false) return
+    } catch {}
+    if (inferCache.has(desc)) {
+      setInferenceSuggestions(inferCache.get(desc))
+      return
+    }
+    const t = setTimeout(() => {
+      api.inferTags(desc)
+        .then(r => {
+          const suggs = r.suggestions ?? []
+          inferCache.set(desc, suggs)
+          setInferenceSuggestions(suggs)
+        })
+        .catch(() => {})
+    }, 400)
+    return () => clearTimeout(t)
+  }, [f.description])
 
   const m = parseFloat(f.amount) || 0
   const proj = f.flow === 'INCOME' ? currentSaldo + m : currentSaldo - m
@@ -250,7 +310,7 @@ function AddModal({ onClose, onSaved, currentSaldo, accountId, recognizedTags, u
           </div>
           <div className="ff full">
             <div className="flbl">Tags / Categorías</div>
-            <TagPicker selected={f.tags} onChange={v => set('tags', v)} usedTags={usedTags} recognized={recognizedTags} />
+            <TagPicker selected={f.tags} onChange={onChangeTags} usedTags={usedTags} recognized={recognizedTags} inferenceSuggestions={inferenceSuggestions} />
           </div>
           <div className="ff full">
             <div className="flbl">Descripción (opcional)</div>
@@ -270,15 +330,38 @@ function AddModal({ onClose, onSaved, currentSaldo, accountId, recognizedTags, u
 
 function EditModal({ tx, onClose, onUpdate, recognizedTags, usedTags }) {
   const [f, setF] = useState({
+    date:    tx.date?.slice(0, 10) ?? '',
     keyUser: tx.key_user ?? '',
     tags:    tx.tags ?? [],
     notes:   tx.notes ?? '',
   })
-  const set = (k, v) => setF(p => ({ ...p, [k]: v }))
+  const set = useCallback((k, v) => setF(p => ({ ...p, [k]: v })), [])
+  const onChangeTags = useCallback(v => setF(p => ({ ...p, tags: v })), [])
   const color = getCatColor(tx.category)
+  const [inferenceSuggestions, setInferenceSuggestions] = useState([])
+
+  useEffect(() => {
+    try {
+      const user = JSON.parse(localStorage.getItem('arasaka_user'))
+      if (user?.settings?.inference_enabled === false) return
+    } catch {}
+    const desc = tx.description
+    if (inferCache.has(desc)) {
+      setInferenceSuggestions(inferCache.get(desc))
+      return
+    }
+    api.inferTags(desc)
+      .then(r => {
+        const suggs = r.suggestions ?? []
+        inferCache.set(desc, suggs)
+        setInferenceSuggestions(suggs)
+      })
+      .catch(() => {})
+  }, [])
 
   function save() {
     const payload = {
+      date:     f.date || undefined,
       tags:     f.tags,
       notes:    f.notes.trim() || null,
       key_user: f.keyUser.trim() || null,
@@ -309,13 +392,18 @@ function EditModal({ tx, onClose, onUpdate, recognizedTags, usedTags }) {
 
         <div className="fgrid">
           <div className="ff full">
+            <div className="flbl">Fecha</div>
+            <input type="date" className="finput" value={f.date}
+              onChange={e => set('date', e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: 12 }} />
+          </div>
+          <div className="ff full">
             <div className="flbl">Subkey <span style={{ color: 'var(--text-dim)', fontWeight: 400, fontSize: 9 }}>tu alias</span></div>
             <input className="finput" placeholder="Tu código / alias" value={f.keyUser}
               onChange={e => set('keyUser', e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: 12 }} />
           </div>
           <div className="ff full">
             <div className="flbl">Tags / Categorías</div>
-            <TagPicker selected={f.tags} onChange={v => set('tags', v)} usedTags={usedTags} recognized={recognizedTags} />
+            <TagPicker selected={f.tags} onChange={onChangeTags} usedTags={usedTags} recognized={recognizedTags} inferenceSuggestions={inferenceSuggestions} />
           </div>
           <div className="ff full">
             <div className="flbl">Descripción</div>
@@ -336,13 +424,182 @@ const PAGE_SIZES = [25, 50, 100]
 const CUR_YEAR   = new Date().getFullYear()
 const YEARS      = Array.from({ length: 5 }, (_, i) => CUR_YEAR - i)
 
+function buildPageNumbers(totalPages, safePage) {
+  return Array.from({ length: totalPages }, (_, i) => i + 1)
+    .filter(p => p === 1 || p === totalPages || Math.abs(p - safePage) <= 2)
+    .reduce((acc, p, i, arr) => {
+      if (i > 0 && p - arr[i - 1] > 1) acc.push('…')
+      acc.push(p)
+      return acc
+    }, [])
+}
+
+const Pagination = memo(function Pagination({
+  safePage, totalPages, onPageChange,
+  filteredCount, pageSize, onPageSizeChange, showPageSizes,
+  prefix = '',
+}) {
+  const pages = useMemo(
+    () => buildPageNumbers(totalPages, safePage),
+    [totalPages, safePage]
+  )
+  const rangeStart = filteredCount === 0 ? 0 : (safePage - 1) * pageSize + 1
+  const rangeEnd   = Math.min(safePage * pageSize, filteredCount)
+
+  return (
+    <div className={`pagination-bar${showPageSizes ? ' pagination-top' : ''}`}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          {filteredCount === 0 ? '0' : `${rangeStart}–${rangeEnd}`} de {filteredCount}
+        </span>
+        {showPageSizes && (
+          <div className="ps-group">
+            {PAGE_SIZES.map(s => (
+              <button key={s} className={`ps-btn${pageSize === s ? ' active' : ''}`} onClick={() => onPageSizeChange(s)}>{s}</button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, visibility: totalPages > 1 ? 'visible' : 'hidden' }}>
+        <button className="nav-arrow" onClick={() => onPageChange(1)} disabled={safePage === 1}
+          style={{ opacity: safePage === 1 ? .3 : 1, fontSize: 12 }}>«</button>
+        <button className="nav-arrow" onClick={() => onPageChange(p => Math.max(1, p - 1))} disabled={safePage === 1}
+          style={{ opacity: safePage === 1 ? .3 : 1 }}>‹</button>
+        {pages.map((p, i) => p === '…' ? (
+          <span key={`${prefix}ellipsis-${i}`} style={{ fontSize: 12, color: 'var(--text-dim)', padding: '0 4px' }}>…</span>
+        ) : (
+          <button key={p} onClick={() => onPageChange(p)}
+            style={{ minWidth: 32, height: 32, borderRadius: 6, border: `1px solid ${p === safePage ? 'var(--accent)' : 'var(--border)'}`, background: p === safePage ? 'var(--accent-dim)' : 'transparent', color: p === safePage ? 'var(--accent)' : 'var(--text-muted)', fontSize: 12, fontWeight: p === safePage ? 700 : 400, cursor: 'pointer', fontFamily: 'var(--font)', transition: 'all var(--t)' }}>
+            {p}
+          </button>
+        ))}
+        <button className="nav-arrow" onClick={() => onPageChange(p => Math.min(totalPages, p + 1))} disabled={safePage === totalPages}
+          style={{ opacity: safePage === totalPages ? .3 : 1 }}>›</button>
+        <button className="nav-arrow" onClick={() => onPageChange(totalPages)} disabled={safePage === totalPages}
+          style={{ opacity: safePage === totalPages ? .3 : 1, fontSize: 12 }}>»</button>
+      </div>
+    </div>
+  )
+})
+
+const TransactionRowDesktop = memo(function TransactionRowDesktop({ tx, selectedId, onEdit }) {
+  const tags = tx.tags ?? []
+  const isSalary = tx.tags?.includes('sueldo') || tx.category === 'sueldo'
+  return (
+    <tr onClick={() => onEdit(tx)} style={{ cursor: 'pointer' }} className={isSalary ? 'tr-salary' : undefined}>
+      <td className="td-date">{formatDate(tx.date)}</td>
+      <td className="col-key" style={{ maxWidth: 130 }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tx.description}>{tx.description}</div>
+        {tx.key_user && (
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tx.key_user}>{tx.key_user}</div>
+        )}
+      </td>
+      <td style={{ minWidth: 200, maxWidth: 320 }}>
+        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, fontWeight: 500, color: 'var(--text-dim)' }}>
+          {tx.notes ?? '—'}
+        </div>
+      </td>
+      <td className="col-tags" style={{ minWidth: 120 }}>
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {tags.map(t => {
+            const color = getCatColor(t)
+            return (
+              <span key={t} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                fontSize: 10, padding: '3px 7px',
+                background: color + '28', color,
+                border: `1px solid ${color}44`,
+                borderRadius: 4, fontWeight: 700, letterSpacing: '0.03em', whiteSpace: 'nowrap',
+              }}>
+                <CatIcon name={t} size={10} color={color} />
+                {t}
+              </span>
+            )
+          })}
+        </div>
+      </td>
+      <td>
+        <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 4,
+          background: tx.flow === 'INCOME' ? 'rgba(76,175,125,.15)' : 'rgba(224,92,92,.15)',
+          color: tx.flow === 'INCOME' ? 'var(--green)' : 'var(--red)',
+        }}>
+          {tx.flow === 'INCOME' ? 'INGRESO' : tx.flow === 'INVEST' ? 'INVERSIÓN' : 'EGRESO'}
+        </span>
+      </td>
+      <td className="td-mono" style={{ textAlign: 'right', color: isSalary ? 'var(--accent)' : tx.flow === 'INCOME' ? 'var(--green)' : 'var(--red)', whiteSpace: 'nowrap', fontWeight: 700 }}>
+        {isSalary ? '✦ ' : (tx.flow === 'INCOME' ? '+' : '-')}{formatCLP(tx.amount)}
+      </td>
+      {selectedId && (
+        <td className="td-mono" style={{ textAlign: 'right', color: (tx.running_balance ?? 0) >= 0 ? 'var(--text-muted)' : 'var(--red)', whiteSpace: 'nowrap' }}>
+          {tx.running_balance != null ? formatCLP(tx.running_balance) : '—'}
+        </td>
+      )}
+    </tr>
+  )
+})
+
+const TransactionCardMobile = memo(function TransactionCardMobile({ tx, selectedId, onEdit }) {
+  const tags = tx.tags ?? []
+  const isIncome = tx.flow === 'INCOME'
+  const isSalaryCard = tx.tags?.includes('sueldo') || tx.category === 'sueldo'
+  return (
+    <div className={`tx-card${isSalaryCard ? ' tx-card-salary' : ''}`} onClick={() => onEdit(tx)}>
+      <div className="tx-card-top">
+        <span className="tx-card-date">{formatDate(tx.date)}</span>
+        <span className="tx-card-amt" style={{ color: isSalaryCard ? 'var(--accent)' : isIncome ? 'var(--green)' : 'var(--red)' }}>
+          {isSalaryCard ? '✦ ' : (isIncome ? '+' : '-')}{formatCLP(tx.amount)}
+        </span>
+      </div>
+      <div className="tx-card-desc" style={{ color: 'var(--accent)', fontFamily: 'var(--mono)', fontSize: 11 }}>
+        {tx.description}
+        {tx.key_user && <span style={{ color: 'var(--text-dim)', marginLeft: 6 }}>{tx.key_user}</span>}
+      </div>
+      {tx.notes && (
+        <div style={{ fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
+          {tx.notes}
+        </div>
+      )}
+      <div className="tx-card-foot">
+        <div className="tx-card-tags">
+          {tags.slice(0, 2).map(t => {
+            const color = getCatColor(t)
+            return (
+              <span key={t} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                fontSize: 10, padding: '2px 6px',
+                background: color + '28', color,
+                border: `1px solid ${color}44`,
+                borderRadius: 4, fontWeight: 700, whiteSpace: 'nowrap',
+              }}>
+                <CatIcon name={t} size={10} color={color} />
+                {t}
+              </span>
+            )
+          })}
+          {tags.length > 2 && (
+            <span style={{ fontSize: 10, color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>+{tags.length - 2} más</span>
+          )}
+        </div>
+        {selectedId && tx.running_balance != null && (
+          <span className="tx-card-saldo" style={{ color: (tx.running_balance ?? 0) >= 0 ? 'var(--text-dim)' : 'var(--red)' }}>
+            {formatCLP(tx.running_balance)}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+})
+
 export default function Ledger() {
   const now = new Date()
   const [searchParams] = useSearchParams()
-  const { selectedId, selectedAccount } = useAccount()
+  const { selectedId, selectedAccount, syncVersion } = useAccount()
   const { recognized: recognizedTags, usedTags, personal: personalTags } = useTags()
   // Top 15 chips: most-used first, personal tags fill remaining slots
-  const allUsedTags = [...usedTags, ...personalTags.filter(p => !usedTags.some(u => tagEq(u, p)))].slice(0, 15)
+  const allUsedTags = useMemo(
+    () => [...usedTags, ...personalTags.filter(p => !usedTags.some(u => tagEq(u, p)))].slice(0, 15),
+    [usedTags, personalTags]
+  )
 
   const [search, setSearch]           = useState('')
   const [selectedTags, setSelectedTags] = useState(() => {
@@ -354,7 +611,7 @@ export default function Ledger() {
   const [dateTo, setDateTo]     = useState('')
   const [year, setYear]         = useState(CUR_YEAR)
   const [page, setPage]         = useState(1)
-  const [pageSize, setPageSize] = useState(100)
+  const [pageSize, setPageSize] = useState(25)
 
   const [transactions, setTransactions] = useState([])
   const [loading, setLoading]     = useState(true)
@@ -395,27 +652,42 @@ export default function Ledger() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [year, selectedTags, flow, selectedId])
+  useEffect(() => { load() }, [year, selectedTags, flow, selectedId, syncVersion])
 
   // Reset to page 1 whenever filters or page size change
   useEffect(() => { setPage(1) }, [search, selectedTags, flow, dateFrom, dateTo, year, pageSize])
 
+  // Pre-compute lowercase search fields once when transactions load, not on every keystroke
+  const searchIndex = useMemo(
+    () => new Map(transactions.map(tx => [tx.id, {
+      desc:  tx.description?.toLowerCase() ?? '',
+      key:   tx.key_user?.toLowerCase()    ?? '',
+      notes: tx.notes?.toLowerCase()       ?? '',
+      cat:   tx.category?.toLowerCase()    ?? '',
+      tags:  tx.tags?.map(t => t.toLowerCase()) ?? [],
+    }])),
+    [transactions]
+  )
+
   const filtered = useMemo(() => {
     let list = transactions
     if (search.trim()) {
-      const q = search.toLowerCase()
-      list = list.filter(tx =>
-        tx.description?.toLowerCase().includes(q) ||
-        tx.key_user?.toLowerCase().includes(q) ||
-        tx.notes?.toLowerCase().includes(q) ||
-        tx.category?.toLowerCase().includes(q) ||
-        tx.tags?.some(t => t.toLowerCase().includes(q))
-      )
+      const q = search.trim().toLowerCase()
+      list = list.filter(tx => {
+        const idx = searchIndex.get(tx.id)
+        return idx && (
+          idx.desc.includes(q)  ||
+          idx.key.includes(q)   ||
+          idx.notes.includes(q) ||
+          idx.cat.includes(q)   ||
+          idx.tags.some(t => t.includes(q))
+        )
+      })
     }
     if (dateFrom) list = list.filter(tx => tx.date?.slice(0, 10) >= dateFrom)
     if (dateTo)   list = list.filter(tx => tx.date?.slice(0, 10) <= dateTo)
     return list
-  }, [transactions, search, dateFrom, dateTo])
+  }, [transactions, searchIndex, search, dateFrom, dateTo])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
   const safePage   = Math.min(page, totalPages)
@@ -424,9 +696,11 @@ export default function Ledger() {
   // running_balance is only meaningful when scoped to a single account
   const curSaldo = selectedId && filtered.length > 0 ? (filtered[0].running_balance ?? null) : null
 
-  function handleUpdate(updated) {
+  const handleUpdate = useCallback((updated) => {
     setTransactions(prev => prev.map(t => t.id === updated.id ? updated : t))
-  }
+  }, [])
+
+  const handleEdit = useCallback((tx) => setEditing(tx), [])
 
   return (
     <div className="fade">
@@ -520,45 +794,16 @@ export default function Ledger() {
           </div>
         ) : (
           <>
-            {/* Pagination rendered above table/list */}
-            <div className="pagination-bar pagination-top">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  {filtered.length === 0 ? '0' : `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, filtered.length)}`} de {filtered.length}
-                </span>
-                <div className="ps-group">
-                  {PAGE_SIZES.map(s => (
-                    <button key={s} className={`ps-btn${pageSize === s ? ' active' : ''}`} onClick={() => setPageSize(s)}>{s}</button>
-                  ))}
-                </div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, visibility: totalPages > 1 ? 'visible' : 'hidden' }}>
-                <button className="nav-arrow" onClick={() => setPage(1)} disabled={safePage === 1}
-                  style={{ opacity: safePage === 1 ? .3 : 1, fontSize: 12 }}>«</button>
-                <button className="nav-arrow" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={safePage === 1}
-                  style={{ opacity: safePage === 1 ? .3 : 1 }}>‹</button>
-                {Array.from({ length: totalPages }, (_, i) => i + 1)
-                  .filter(p => p === 1 || p === totalPages || Math.abs(p - safePage) <= 2)
-                  .reduce((acc, p, i, arr) => {
-                    if (i > 0 && p - arr[i - 1] > 1) acc.push('…')
-                    acc.push(p)
-                    return acc
-                  }, [])
-                  .map((p, i) => p === '…' ? (
-                    <span key={`ellipsis-top-${i}`} style={{ fontSize: 12, color: 'var(--text-dim)', padding: '0 4px' }}>…</span>
-                  ) : (
-                    <button key={p} onClick={() => setPage(p)}
-                      style={{ minWidth: 32, height: 32, borderRadius: 6, border: `1px solid ${p === safePage ? 'var(--accent)' : 'var(--border)'}`, background: p === safePage ? 'var(--accent-dim)' : 'transparent', color: p === safePage ? 'var(--accent)' : 'var(--text-muted)', fontSize: 12, fontWeight: p === safePage ? 700 : 400, cursor: 'pointer', fontFamily: 'var(--font)', transition: 'all var(--t)' }}>
-                      {p}
-                    </button>
-                  ))
-                }
-                <button className="nav-arrow" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={safePage === totalPages}
-                  style={{ opacity: safePage === totalPages ? .3 : 1 }}>›</button>
-                <button className="nav-arrow" onClick={() => setPage(totalPages)} disabled={safePage === totalPages}
-                  style={{ opacity: safePage === totalPages ? .3 : 1, fontSize: 12 }}>»</button>
-              </div>
-            </div>
+            <Pagination
+              safePage={safePage}
+              totalPages={totalPages}
+              onPageChange={setPage}
+              filteredCount={filtered.length}
+              pageSize={pageSize}
+              onPageSizeChange={setPageSize}
+              showPageSizes
+              prefix="top-"
+            />
 
             {/* Desktop table */}
             <div className="tbl-wrap tbl-desktop">
@@ -575,154 +820,28 @@ export default function Ledger() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pageRows.map(tx => {
-                    const tags = tx.tags ?? []
-                    const isSalary = tx.tags?.includes('sueldo') || tx.category === 'sueldo'
-                    return (
-                      <tr key={tx.id} onClick={() => setEditing(tx)} style={{ cursor: 'pointer' }} className={isSalary ? 'tr-salary' : undefined}>
-                        <td className="td-date">{formatDate(tx.date)}</td>
-                        <td className="col-key" style={{ maxWidth: 130 }}>
-                          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tx.description}>{tx.description}</div>
-                          {tx.key_user && (
-                            <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tx.key_user}>{tx.key_user}</div>
-                          )}
-                        </td>
-                        <td style={{ minWidth: 200, maxWidth: 320 }}>
-                          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, fontWeight: 500, color: 'var(--text-dim)' }}>
-                            {tx.notes ?? '—'}
-                          </div>
-                        </td>
-                        <td className="col-tags" style={{ minWidth: 120 }}>
-                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                            {tags.map(t => {
-                              const color = getCatColor(t)
-                              return (
-                                <span key={t} style={{
-                                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                                  fontSize: 10, padding: '3px 7px',
-                                  background: color + '28', color,
-                                  border: `1px solid ${color}44`,
-                                  borderRadius: 4, fontWeight: 700, letterSpacing: '0.03em', whiteSpace: 'nowrap',
-                                }}>
-                                  <CatIcon name={t} size={10} color={color} />
-                                  {t}
-                                </span>
-                              )
-                            })}
-                          </div>
-                        </td>
-                        <td>
-                          <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 4,
-                            background: tx.flow === 'INCOME' ? 'rgba(76,175,125,.15)' : 'rgba(224,92,92,.15)',
-                            color: tx.flow === 'INCOME' ? 'var(--green)' : 'var(--red)',
-                          }}>
-                            {tx.flow === 'INCOME' ? 'INGRESO' : tx.flow === 'INVEST' ? 'INVERSIÓN' : 'EGRESO'}
-                          </span>
-                        </td>
-                        <td className="td-mono" style={{ textAlign: 'right', color: isSalary ? 'var(--accent)' : tx.flow === 'INCOME' ? 'var(--green)' : 'var(--red)', whiteSpace: 'nowrap', fontWeight: 700 }}>
-                          {isSalary ? '✦ ' : (tx.flow === 'INCOME' ? '+' : '-')}{formatCLP(tx.amount)}
-                        </td>
-                        {selectedId && (
-                          <td className="td-mono" style={{ textAlign: 'right', color: (tx.running_balance ?? 0) >= 0 ? 'var(--text-muted)' : 'var(--red)', whiteSpace: 'nowrap' }}>
-                            {tx.running_balance != null ? formatCLP(tx.running_balance) : '—'}
-                          </td>
-                        )}
-                      </tr>
-                    )
-                  })}
+                  {pageRows.map(tx => (
+                    <TransactionRowDesktop key={tx.id} tx={tx} selectedId={selectedId} onEdit={handleEdit} />
+                  ))}
                 </tbody>
               </table>
             </div>
 
             {/* Mobile card list */}
             <div className="tx-list">
-              {pageRows.map(tx => {
-                const tags = tx.tags ?? []
-                const isIncome = tx.flow === 'INCOME'
-                const isSalaryCard = tx.tags?.includes('sueldo') || tx.category === 'sueldo'
-                return (
-                  <div key={tx.id} className={`tx-card${isSalaryCard ? ' tx-card-salary' : ''}`} onClick={() => setEditing(tx)}>
-                    <div className="tx-card-top">
-                      <span className="tx-card-date">{formatDate(tx.date)}</span>
-                      <span className="tx-card-amt" style={{ color: isSalaryCard ? 'var(--accent)' : isIncome ? 'var(--green)' : 'var(--red)' }}>
-                        {isSalaryCard ? '✦ ' : (isIncome ? '+' : '-')}{formatCLP(tx.amount)}
-                      </span>
-                    </div>
-                    <div className="tx-card-desc" style={{ color: 'var(--accent)', fontFamily: 'var(--mono)', fontSize: 11 }}>
-                      {tx.description}
-                      {tx.key_user && <span style={{ color: 'var(--text-dim)', marginLeft: 6 }}>{tx.key_user}</span>}
-                    </div>
-                    {tx.notes && (
-                      <div style={{ fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
-                        {tx.notes}
-                      </div>
-                    )}
-                    <div className="tx-card-foot">
-                      <div className="tx-card-tags">
-                        {tags.slice(0, 2).map(t => {
-                          const color = getCatColor(t)
-                          return (
-                            <span key={t} style={{
-                              display: 'inline-flex', alignItems: 'center', gap: 4,
-                              fontSize: 10, padding: '2px 6px',
-                              background: color + '28', color,
-                              border: `1px solid ${color}44`,
-                              borderRadius: 4, fontWeight: 700, whiteSpace: 'nowrap',
-                            }}>
-                              <CatIcon name={t} size={10} color={color} />
-                              {t}
-                            </span>
-                          )
-                        })}
-                        {tags.length > 2 && (
-                          <span style={{ fontSize: 10, color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>+{tags.length - 2} más</span>
-                        )}
-                      </div>
-                      {selectedId && tx.running_balance != null && (
-                        <span className="tx-card-saldo" style={{ color: (tx.running_balance ?? 0) >= 0 ? 'var(--text-dim)' : 'var(--red)' }}>
-                          {formatCLP(tx.running_balance)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
+              {pageRows.map(tx => (
+                <TransactionCardMobile key={tx.id} tx={tx} selectedId={selectedId} onEdit={handleEdit} />
+              ))}
             </div>
 
-            {/* Pagination bar */}
-            <div className="pagination-bar">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  {filtered.length === 0 ? '0' : `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, filtered.length)}`} de {filtered.length}
-                </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, visibility: totalPages > 1 ? 'visible' : 'hidden' }}>
-                <button className="nav-arrow" onClick={() => setPage(1)} disabled={safePage === 1}
-                  style={{ opacity: safePage === 1 ? .3 : 1, fontSize: 12 }}>«</button>
-                <button className="nav-arrow" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={safePage === 1}
-                  style={{ opacity: safePage === 1 ? .3 : 1 }}>‹</button>
-                {Array.from({ length: totalPages }, (_, i) => i + 1)
-                  .filter(p => p === 1 || p === totalPages || Math.abs(p - safePage) <= 2)
-                  .reduce((acc, p, i, arr) => {
-                    if (i > 0 && p - arr[i - 1] > 1) acc.push('…')
-                    acc.push(p)
-                    return acc
-                  }, [])
-                  .map((p, i) => p === '…' ? (
-                    <span key={`ellipsis-${i}`} style={{ fontSize: 12, color: 'var(--text-dim)', padding: '0 4px' }}>…</span>
-                  ) : (
-                    <button key={p} onClick={() => setPage(p)}
-                      style={{ minWidth: 32, height: 32, borderRadius: 6, border: `1px solid ${p === safePage ? 'var(--accent)' : 'var(--border)'}`, background: p === safePage ? 'var(--accent-dim)' : 'transparent', color: p === safePage ? 'var(--accent)' : 'var(--text-muted)', fontSize: 12, fontWeight: p === safePage ? 700 : 400, cursor: 'pointer', fontFamily: 'var(--font)', transition: 'all var(--t)' }}>
-                      {p}
-                    </button>
-                  ))
-                }
-                <button className="nav-arrow" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={safePage === totalPages}
-                  style={{ opacity: safePage === totalPages ? .3 : 1 }}>›</button>
-                <button className="nav-arrow" onClick={() => setPage(totalPages)} disabled={safePage === totalPages}
-                  style={{ opacity: safePage === totalPages ? .3 : 1, fontSize: 12 }}>»</button>
-              </div>
-            </div>
+            <Pagination
+              safePage={safePage}
+              totalPages={totalPages}
+              onPageChange={setPage}
+              filteredCount={filtered.length}
+              pageSize={pageSize}
+              prefix="bot-"
+            />
           </>
         )
       )}

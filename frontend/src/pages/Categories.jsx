@@ -1,62 +1,59 @@
-import { useState, useEffect, useRef } from 'react'
-import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { api } from '../api/client'
-import { formatCLP, formatDate } from '../lib/formatters'
-import { getCatColor, MONTHS, MONTH_ABBR } from '../lib/constants'
+import { formatCLP } from '../lib/formatters'
+import { getCatColor, MONTH_ABBR } from '../lib/constants'
 import { useTags, clearTagsCache } from '../lib/useTags'
 import Spinner from '../components/Spinner'
 import CatIcon from '../components/CatIcon'
 import { useAccount } from '../context/AccountContext'
 import { ICON_BY_NAME } from '../lib/icons'
 
-const INCOME_TAGS = ['sueldo', 'devolucion']
-
-function normalizeTag(raw) {
-  const stripped = raw.replace(/^#+/, '').trim()
-  const words = stripped.split(/[\s_-]+/).filter(Boolean)
-  if (!words.length) return ''
-  return words[0].toLowerCase() + words.slice(1).map(w => w[0].toUpperCase() + w.slice(1).toLowerCase()).join('')
-}
-
-function parseBudgets(rawBudgets, recognizedTags) {
-  const base = {}
-  for (const b of rawBudgets) {
-    if (b.month === 0) base[b.category] = b.amount
-  }
-  const result = {}
-  for (const cat of recognizedTags) result[cat] = base[cat] ?? 0
-  for (const b of rawBudgets) {
-    if (b.month === 0 && !recognizedTags.includes(b.category)) result[b.category] = b.amount
-  }
-  return result
-}
-
-function PieTooltip({ active, payload }) {
-  if (!active || !payload?.length) return null
-  const d = payload[0]
-  return (
-    <div style={{ background: '#111114', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
-      <p style={{ fontWeight: 600, color: 'var(--text)' }}>{d.name}</p>
-      <p style={{ color: d.payload.fill }}>{formatCLP(d.value)}</p>
-    </div>
-  )
-}
-
 const ICON_NAMES = Object.keys(ICON_BY_NAME)
+const NOW = new Date()
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function readSalary() {
+  try {
+    const u = JSON.parse(localStorage.getItem('arasaka_user'))
+    return u?.settings?.monthly_salary ?? 0
+  } catch { return 0 }
+}
+
+function writeSalaryLocal(val) {
+  try {
+    const u = JSON.parse(localStorage.getItem('arasaka_user'))
+    if (u) localStorage.setItem('arasaka_user', JSON.stringify({
+      ...u, settings: { ...(u.settings ?? {}), monthly_salary: val },
+    }))
+  } catch {}
+}
+
+function readSettings() {
+  try {
+    const u = JSON.parse(localStorage.getItem('arasaka_user'))
+    return u?.settings ?? {}
+  } catch { return {} }
+}
+
+// All maps are keyed by lowercase tag. Use this to look up.
+function lk(tag) { return (tag ?? '').toLowerCase() }
+
+// ── IconPickerModal ──────────────────────────────────────────────────────────
 
 function IconPickerModal({ tag, currentIcon, onSelect, onClose }) {
   const ref = useRef(null)
   useEffect(() => {
-    function handler(e) { if (ref.current && !ref.current.contains(e.target)) onClose() }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    function h(e) { if (ref.current && !ref.current.contains(e.target)) onClose() }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
   }, [onClose])
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.6)' }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.65)' }}>
       <div ref={ref} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, width: 360, maxHeight: '80vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>Icono — {tag}</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>Ícono — {tag}</div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: 18 }}>×</button>
         </div>
         <button
@@ -87,70 +84,513 @@ function IconPickerModal({ tag, currentIcon, onSelect, onClose }) {
   )
 }
 
-function TagsPanel({ usedTags, initialPersonal, initialPersonalEntries }) {
-  const [personal, setPersonal] = useState(initialPersonal)
-  const [entries, setEntries]   = useState(initialPersonalEntries)
+// ── MiniBarChart ─────────────────────────────────────────────────────────────
+
+function MiniBarChart({ values, budget, color, currentMonth }) {
+  const W = 180, H = 36, pad = 2
+  const barW = (W - pad * 11) / 12
+  const max = Math.max(...values, budget, 1)
+  const budgetY = H - (budget / max) * H
+
+  return (
+    <svg width={W} height={H} style={{ overflow: 'visible', display: 'block' }}>
+      {values.map((v, i) => {
+        const bh = Math.max(2, (v / max) * H)
+        const x = i * (barW + pad)
+        return (
+          <rect
+            key={i}
+            x={x}
+            y={H - bh}
+            width={barW}
+            height={bh}
+            rx={1}
+            fill={i === (currentMonth - 1) ? color : color + '55'}
+          />
+        )
+      })}
+      {budget > 0 && (
+        <line x1={0} y1={budgetY} x2={W} y2={budgetY}
+          stroke={color} strokeWidth={1} strokeDasharray="3 2" opacity={0.7} />
+      )}
+    </svg>
+  )
+}
+
+// ── SalaryDistBar ─────────────────────────────────────────────────────────────
+// budgets / spending are keyed by lowercase tag
+
+function SalaryDistBar({ tags, budgets, spending, salary, onEditSalary }) {
+  const [editing, setEditing] = useState(false)
   const [input, setInput] = useState('')
-  const [suggestions, setSuggestions] = useState([])
+
+  const totalBudgeted = tags.reduce((s, t) => s + (budgets[lk(t)] ?? 0), 0)
+  const totalSpent    = tags.reduce((s, t) => s + (spending[lk(t)] ?? 0), 0)
+
+  // When no salary, segments are proportional to totalBudgeted (relative distribution)
+  const base = salary > 0 ? salary : totalBudgeted
+  const pctBudgeted = salary > 0 ? Math.min(100, totalBudgeted / salary * 100) : 100
+  const pctSpent    = salary > 0 ? Math.min(100, totalSpent    / salary * 100)
+                    : totalBudgeted > 0 ? Math.min(100, totalSpent / totalBudgeted * 100) : 0
+  const pctFree     = salary > 0 ? Math.max(0, 100 - pctBudgeted) : null
+
+  function startEdit() { setInput(salary > 0 ? String(salary) : ''); setEditing(true) }
+  function commitEdit() {
+    const val = Math.max(0, Number(input.replace(/\D/g, '')) || 0)
+    onEditSalary(val)
+    setEditing(false)
+  }
+
+  let runningPct = 0
+  const segments = tags
+    .filter(t => (budgets[lk(t)] ?? 0) > 0 && base > 0)
+    .map(t => {
+      const pct = Math.min((budgets[lk(t)] / base) * 100, 100 - runningPct)
+      const seg = { tag: t, pct, offset: runningPct, color: getCatColor(t) }
+      runningPct += pct
+      return seg
+    })
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.05em' }}>DISTRIBUCIÓN DEL SUELDO</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>Sueldo mensual:</span>
+          {editing ? (
+            <input
+              autoFocus
+              className="finput"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onBlur={commitEdit}
+              onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditing(false) }}
+              style={{ fontFamily: 'var(--mono)', fontSize: 12, width: 110, boxSizing: 'border-box' }}
+            />
+          ) : (
+            <button
+              onClick={startEdit}
+              style={{ background: 'none', border: 'none', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', padding: '2px 4px' }}
+            >
+              {salary > 0 ? formatCLP(salary) : '+ Definir sueldo'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Barra apilada */}
+      <div style={{ height: 12, background: 'rgba(255,255,255,.05)', borderRadius: 6, overflow: 'hidden', position: 'relative', marginBottom: 10 }}>
+        {segments.map(s => (
+          <div
+            key={s.tag}
+            title={`${s.tag}: ${s.pct.toFixed(1)}%`}
+            style={{
+              position: 'absolute',
+              left: `${s.offset}%`,
+              width: `${s.pct}%`,
+              height: '100%',
+              background: s.color,
+              transition: 'width .3s',
+            }}
+          />
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 20 }}>
+        <div>
+          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 2 }}>PRESUPUESTADO</div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>
+            {salary > 0 ? `${pctBudgeted.toFixed(1)}%` : formatCLP(totalBudgeted)}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 2 }}>GASTADO</div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: totalSpent > totalBudgeted && totalBudgeted > 0 ? 'var(--red)' : 'var(--green)', fontWeight: 600 }}>
+            {salary > 0 ? `${pctSpent.toFixed(1)}%` : formatCLP(totalSpent)}
+          </div>
+        </div>
+        {pctFree !== null && (
+          <div>
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 2 }}>SIN ASIGNAR</div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>{pctFree.toFixed(1)}%</div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── TagCard ──────────────────────────────────────────────────────────────────
+
+function TagCard({
+  tag, icon, budget, spent, salary, view, monthlyValues, currentMonth,
+  onEditBudget, onEditIcon, onDelete, onSelect, selected,
+}) {
+  const [editingBudget, setEditingBudget] = useState(false)
+  const [budgetInput, setBudgetInput] = useState('')
+  const color = getCatColor(tag)
+
+  const pct   = budget > 0 ? Math.min(100, spent / budget * 100) : 0
+  const pctSalary = salary > 0 && budget > 0 ? (budget / salary * 100).toFixed(1) : null
+  const over  = spent > budget && budget > 0
+
+  function startEditBudget(e) {
+    e.stopPropagation()
+    setBudgetInput(budget > 0 ? String(budget) : '')
+    setEditingBudget(true)
+  }
+  function commitBudget() {
+    const val = Math.max(0, Number(budgetInput.replace(/\D/g, '')) || 0)
+    onEditBudget(tag, val)
+    setEditingBudget(false)
+  }
+
+  return (
+    <div
+      onClick={() => onSelect(tag)}
+      style={{
+        background: selected ? color + '18' : 'var(--surface2)',
+        border: `1px solid ${selected ? color + '66' : 'var(--border)'}`,
+        borderRadius: 10,
+        padding: '14px 16px',
+        cursor: 'pointer',
+        transition: 'all .15s',
+        position: 'relative',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <button
+          onClick={e => { e.stopPropagation(); onEditIcon(tag) }}
+          title="Cambiar ícono"
+          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', flexShrink: 0 }}
+        >
+          <CatIcon name={tag} overrideIcon={icon ?? null} size={18} />
+        </button>
+        <span style={{ fontSize: 13, fontWeight: 700, color: selected ? color : 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tag}</span>
+        {pctSalary && (
+          <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--mono)', flexShrink: 0 }}>{pctSalary}% sueldo</span>
+        )}
+        <button
+          onClick={e => { e.stopPropagation(); onDelete(tag) }}
+          title="Eliminar"
+          style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '0 2px', flexShrink: 0, opacity: 0.4 }}
+          onMouseEnter={e => e.currentTarget.style.opacity = 1}
+          onMouseLeave={e => e.currentTarget.style.opacity = 0.4}
+        >
+          ×
+        </button>
+      </div>
+
+      {view === 'year' && monthlyValues && (
+        <div style={{ marginBottom: 10 }}>
+          <MiniBarChart values={monthlyValues} budget={budget} color={color} currentMonth={currentMonth} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+            {[0, 3, 6, 9, 11].map(i => (
+              <span key={i} style={{ fontSize: 8, color: 'var(--text-dim)' }}>{MONTH_ABBR[i]}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 14, color: over ? 'var(--red)' : color, fontWeight: 600 }}>{formatCLP(spent)}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>/ </span>
+          {editingBudget ? (
+            <input
+              autoFocus
+              className="finput"
+              value={budgetInput}
+              onChange={e => setBudgetInput(e.target.value)}
+              onBlur={commitBudget}
+              onKeyDown={e => { if (e.key === 'Enter') commitBudget(); if (e.key === 'Escape') setEditingBudget(false) }}
+              onClick={e => e.stopPropagation()}
+              style={{ fontFamily: 'var(--mono)', fontSize: 12, width: 90, boxSizing: 'border-box' }}
+            />
+          ) : (
+            <button
+              onClick={startEditBudget}
+              style={{ background: 'none', border: 'none', fontFamily: 'var(--mono)', fontSize: 12, color: budget > 0 ? 'var(--text-muted)' : 'var(--text-dim)', cursor: 'pointer', padding: '1px 3px' }}
+            >
+              {budget > 0 ? formatCLP(budget) : '+ presupuesto'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div style={{ height: 3, background: 'rgba(255,255,255,.06)', borderRadius: 2, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${pct}%`, background: over ? 'var(--red)' : color, borderRadius: 2, transition: 'width .3s' }} />
+      </div>
+    </div>
+  )
+}
+
+// ── AnnualDetailPanel ─────────────────────────────────────────────────────────
+
+function AnnualDetailPanel({ tag, icon, budget, monthlyValues, salary, onClose }) {
+  const color = getCatColor(tag)
+  const upToNow = monthlyValues.slice(0, NOW.getMonth() + 1)
+  const total = upToNow.reduce((s, v) => s + v, 0)
+  const avg = upToNow.length > 0 ? total / upToNow.length : 0
+  const pctIncome = salary > 0 ? (avg / salary * 100).toFixed(1) : null
+
+  const W = 480, H = 120, pad = 4
+  const barW = (W - pad * 11) / 12
+  const max = Math.max(...monthlyValues, budget, 1)
+  const budgetY = H - (budget / max) * H
+
+  return (
+    <div className="card fade" style={{ marginTop: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+        <CatIcon name={tag} overrideIcon={icon ?? null} size={22} />
+        <div style={{ fontSize: 16, fontWeight: 700, color }}>{tag}</div>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 20 }}>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>TOTAL AÑO</div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 13, color, fontWeight: 600 }}>{formatCLP(total)}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>PROMEDIO/MES</div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>{formatCLP(avg)}</div>
+          </div>
+          {pctIncome && (
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>% SUELDO</div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>{pctIncome}%</div>
+            </div>
+          )}
+        </div>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: 20, lineHeight: 1 }}>×</button>
+      </div>
+
+      <svg width="100%" viewBox={`0 0 ${W} ${H + 16}`} style={{ display: 'block', marginBottom: 6 }}>
+        {monthlyValues.map((v, i) => {
+          const bh = Math.max(2, (v / max) * H)
+          const x = i * (barW + pad)
+          return (
+            <g key={i}>
+              <rect x={x} y={H - bh} width={barW} height={bh} rx={2}
+                fill={i === NOW.getMonth() ? color : color + '66'} />
+              <text x={x + barW / 2} y={H + 14} textAnchor="middle"
+                fontSize={8} fill="var(--text-dim)">{MONTH_ABBR[i]}</text>
+            </g>
+          )
+        })}
+        {budget > 0 && (
+          <line x1={0} y1={budgetY} x2={W} y2={budgetY}
+            stroke={color} strokeWidth={1.5} strokeDasharray="4 3" opacity={0.7} />
+        )}
+      </svg>
+
+      <div style={{ marginTop: 16 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              <th style={{ textAlign: 'left', padding: '4px 8px', color: 'var(--text-dim)', fontWeight: 600 }}>Mes</th>
+              <th style={{ textAlign: 'right', padding: '4px 8px', color: 'var(--text-dim)', fontWeight: 600 }}>Gastado</th>
+              {budget > 0 && <th style={{ textAlign: 'right', padding: '4px 8px', color: 'var(--text-dim)', fontWeight: 600 }}>vs Presupuesto</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {monthlyValues.map((v, i) => {
+              const over = budget > 0 && v > budget
+              return (
+                <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,.04)', background: i === NOW.getMonth() ? color + '0d' : 'transparent' }}>
+                  <td style={{ padding: '5px 8px', color: 'var(--text-muted)' }}>{MONTH_ABBR[i]}</td>
+                  <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'var(--mono)', color: over ? 'var(--red)' : 'var(--text)' }}>{v > 0 ? formatCLP(v) : '—'}</td>
+                  {budget > 0 && (
+                    <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'var(--mono)', color: over ? 'var(--red)' : 'var(--text-dim)', fontSize: 10 }}>
+                      {v > 0 ? `${(v / budget * 100).toFixed(0)}%` : '—'}
+                    </td>
+                  )}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ── AddTagForm ────────────────────────────────────────────────────────────────
+
+function AddTagForm({ onAdd, onCancel }) {
+  const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
-  const [pickerTag, setPickerTag] = useState(null)
 
-  useEffect(() => { setPersonal(initialPersonal) }, [initialPersonal.join(',')])
-  useEffect(() => { setEntries(initialPersonalEntries) }, [initialPersonalEntries.map(e => e.tag + (e.icon ?? '')).join(',')])
-
-  const top15 = usedTags.slice(0, 15)
-
-  function iconForTag(tag) {
-    return entries.find(e => e.tag === tag)?.icon ?? null
-  }
-
-  function updateSuggestions(val) {
-    if (!val.trim()) { setSuggestions([]); return }
-    const norm = normalizeTag(val)
-    const pool = [...new Set([...personal, ...usedTags])]
-    const lc = (norm || val).toLowerCase()
-    const filtered = pool.filter(t => t.toLowerCase().includes(lc)).slice(0, 8)
-    const result = [...filtered]
-    if (norm && !pool.some(t => t.toLowerCase() === norm.toLowerCase())) {
-      result.push('__new__:' + norm)
-    }
-    setSuggestions(result)
-  }
-
-  async function addTag(raw) {
-    const tag = normalizeTag(raw)
-    if (!tag) return
-    if (personal.includes(tag)) { setInput(''); setSuggestions([]); return }
+  async function handleSubmit(e) {
+    e.preventDefault()
+    const trimmed = name.trim()
+    if (!trimmed) return
     setSaving(true)
+    try { await onAdd(trimmed) } finally { setSaving(false) }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+      <input
+        autoFocus
+        className="finput"
+        placeholder="Nombre del tag"
+        value={name}
+        onChange={e => setName(e.target.value)}
+        onKeyDown={e => e.key === 'Escape' && onCancel()}
+        style={{ flex: 1, fontSize: 12, boxSizing: 'border-box' }}
+        disabled={saving}
+      />
+      <button type="submit" className="btn-gold" disabled={saving || !name.trim()} style={{ fontSize: 12, padding: '5px 12px' }}>
+        {saving ? '…' : 'Agregar'}
+      </button>
+      <button type="button" onClick={onCancel} style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: 15 }}>×</button>
+    </form>
+  )
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
+
+export default function Categories() {
+  const { selectedId } = useAccount()
+  const { personalEntries, loaded: tagsLoaded } = useTags()
+
+  const [view, setView]   = useState('month')
+  const [year, setYear]   = useState(NOW.getFullYear())
+  const [month, setMonth] = useState(NOW.getMonth() + 1)
+
+  const [entries, setEntries] = useState([])
+  useEffect(() => { if (tagsLoaded) setEntries(personalEntries) }, [tagsLoaded, personalEntries])
+
+  // All maps keyed by lowercase tag
+  const [budgets, setBudgets]     = useState({})
+  const [spending, setSpending]   = useState({})
+  const [monthlyData, setMonthlyData] = useState({})
+
+  const [loadingSpend, setLoadingSpend]     = useState(false)
+  const [loadingMonthly, setLoadingMonthly] = useState(false)
+  const [loadingBudgets, setLoadingBudgets] = useState(true)
+
+  const [salary, setSalary]       = useState(readSalary)
+  const [pickerTag, setPickerTag] = useState(null)
+  const [selectedTag, setSelectedTag] = useState(null)
+  const [addingTag, setAddingTag] = useState(false)
+
+  // Load tag budgets — normalize keys to lowercase
+  useEffect(() => {
+    setLoadingBudgets(true)
+    api.tagBudgets(year)
+      .then(data => {
+        const map = {}
+        for (const b of (Array.isArray(data) ? data : [])) {
+          if (b.month === 0) map[lk(b.tag)] = b.amount
+        }
+        setBudgets(map)
+      })
+      .catch(() => {})
+      .finally(() => setLoadingBudgets(false))
+  }, [year])
+
+  // Load spending — normalize keys to lowercase
+  useEffect(() => {
+    setLoadingSpend(true)
+    setSelectedTag(null)
+    const params = { year }
+    if (view === 'month') params.month = month
+    if (selectedId) params.account_id = selectedId
+    api.tagSpending(params)
+      .then(data => {
+        const map = {}
+        for (const d of (Array.isArray(data) ? data : [])) map[lk(d.tag)] = d.total
+        setSpending(map)
+      })
+      .catch(() => {})
+      .finally(() => setLoadingSpend(false))
+  }, [view, year, month, selectedId])
+
+  // Load 12-month breakdown — normalize keys to lowercase
+  useEffect(() => {
+    if (view !== 'year') return
+    setLoadingMonthly(true)
+    const fetches = Array.from({ length: 12 }, (_, i) =>
+      api.tagSpending({ year, month: i + 1, ...(selectedId ? { account_id: selectedId } : {}) })
+        .then(d => Array.isArray(d) ? d : [])
+        .catch(() => [])
+    )
+    Promise.all(fetches).then(months => {
+      const map = {}
+      months.forEach((data, mi) => {
+        for (const d of data) {
+          const key = lk(d.tag)
+          if (!map[key]) map[key] = Array(12).fill(0)
+          map[key][mi] = d.total
+        }
+      })
+      setMonthlyData(map)
+      setLoadingMonthly(false)
+    })
+  }, [view, year, selectedId])
+
+  const handleSalaryEdit = useCallback(async (val) => {
+    setSalary(val)
+    writeSalaryLocal(val)
     try {
-      await api.savePersonalTag(tag)
-      setPersonal(prev => [...prev, tag].sort())
-      setEntries(prev => [...prev, { tag, icon: null }].sort((a, b) => a.tag.localeCompare(b.tag)))
-      clearTagsCache()
-    } catch { /* silent */ }
-    finally { setSaving(false) }
-    setInput('')
-    setSuggestions([])
+      const s = readSettings()
+      await api.updateUserSettings({ ...s, monthly_salary: val })
+    } catch {}
+  }, [])
+
+  async function handleBudgetEdit(tag, amount) {
+    setBudgets(prev => ({ ...prev, [lk(tag)]: amount }))
+    try { await api.upsertTagBudget({ tag, year, month: 0, amount }) } catch {}
   }
 
   async function handleSetIcon(tag, iconName) {
     try {
       await api.setTagIcon(tag, iconName ?? '')
-      setEntries(prev => prev.map(e => e.tag === tag ? { ...e, icon: iconName } : e))
+      setEntries(prev => prev.map(e => e.tag === tag ? { ...e, icon: iconName ?? null } : e))
       clearTagsCache()
-    } catch { /* silent */ }
+    } catch {}
     setPickerTag(null)
   }
 
-  function handleKeyDown(e) {
-    if (e.key === 'Enter') { e.preventDefault(); addTag(input) }
-    if (e.key === 'Escape') { setSuggestions([]) }
+  async function handleDelete(tag) {
+    setEntries(prev => prev.filter(e => e.tag !== tag))
+    if (selectedTag === tag) setSelectedTag(null)
+    try { await api.deletePersonalTag(tag); clearTagsCache() } catch {}
   }
 
+  async function handleAddTag(name) {
+    try {
+      await api.savePersonalTag(name)
+      setEntries(prev => [...prev, { tag: name, icon: null }].sort((a, b) => a.tag.localeCompare(b.tag)))
+      clearTagsCache()
+    } catch {}
+    setAddingTag(false)
+  }
+
+  function prevPeriod() {
+    if (view === 'month') {
+      if (month === 1) { setMonth(12); setYear(y => y - 1) } else setMonth(m => m - 1)
+    } else setYear(y => y - 1)
+  }
+  function nextPeriod() {
+    if (view === 'month') {
+      if (month === 12) { setMonth(1); setYear(y => y + 1) } else setMonth(m => m + 1)
+    } else setYear(y => y + 1)
+  }
+
+  const personalTags    = entries.map(e => e.tag)
+  const spendingOnlyTags = Object.keys(spending).filter(k => !personalTags.some(p => lk(p) === k))
+  const allTags         = [...personalTags, ...spendingOnlyTags]
+
+  function iconFor(tag)   { return entries.find(e => e.tag === tag)?.icon ?? null }
+  function budgetFor(tag) { return budgets[lk(tag)] ?? 0 }
+  function spentFor(tag)  { return spending[lk(tag)] ?? 0 }
+
   const pickerEntry = pickerTag ? entries.find(e => e.tag === pickerTag) : null
+  const loading     = loadingSpend || loadingBudgets || !tagsLoaded
 
   return (
-    <div className="card">
+    <div className="fade">
       {pickerTag && (
         <IconPickerModal
           tag={pickerTag}
@@ -160,504 +600,166 @@ function TagsPanel({ usedTags, initialPersonal, initialPersonalEntries }) {
         />
       )}
 
-      <div className="card-title">Tags Personales</div>
-
-      <div style={{ position: 'relative', marginBottom: 12 }}>
-        <input
-          className="finput"
-          placeholder="Ej. #MiTag o #Ropa Cara"
-          value={input}
-          onChange={e => { setInput(e.target.value); updateSuggestions(e.target.value) }}
-          onKeyDown={handleKeyDown}
-          onBlur={() => setTimeout(() => setSuggestions([]), 150)}
-          style={{ width: '100%', boxSizing: 'border-box' }}
-          disabled={saving}
-        />
-        {suggestions.length > 0 && (
-          <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, marginTop: 2, overflow: 'hidden' }}>
-            {suggestions.map(s => {
-              const isNew = s.startsWith('__new__:')
-              const label = isNew ? s.slice(8) : s
-              return (
-                <div
-                  key={s}
-                  onMouseDown={() => addTag(label)}
-                  style={{ padding: '7px 12px', fontSize: 12, cursor: 'pointer', color: isNew ? 'var(--accent)' : 'var(--text)', display: 'flex', alignItems: 'center', gap: 6 }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,.05)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                >
-                  {isNew && <span style={{ fontSize: 10, color: 'var(--accent)', border: '1px solid var(--accent)', borderRadius: 3, padding: '1px 4px' }}>nuevo</span>}
-                  {label}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-
-      {top15.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, letterSpacing: '0.06em' }}>MÁS USADOS</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {top15.map(t => {
-              const inPersonal = personal.includes(t)
-              return (
-                <button
-                  key={t}
-                  onClick={() => addTag(t)}
-                  disabled={inPersonal || saving}
-                  style={{
-                    background: inPersonal ? 'var(--border)' : 'var(--surface2)',
-                    border: `1px solid ${inPersonal ? 'var(--border)' : 'var(--accent)33'}`,
-                    borderRadius: 4, padding: '3px 8px', fontSize: 11,
-                    color: inPersonal ? 'var(--text-dim)' : 'var(--text-muted)',
-                    cursor: inPersonal ? 'default' : 'pointer',
-                  }}
-                >
-                  {t}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {personal.length > 0 && (
-        <div>
-          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, letterSpacing: '0.06em' }}>MIS TAGS ({personal.length})</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {personal.map(t => (
-              <span
-                key={t}
-                style={{ background: 'var(--accent)1a', border: '1px solid var(--accent)44', borderRadius: 4, padding: '3px 6px', fontSize: 11, color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 4 }}
-              >
-                <button
-                  onClick={() => setPickerTag(t)}
-                  title="Cambiar icono"
-                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', color: 'inherit' }}
-                >
-                  <CatIcon name={t} overrideIcon={iconForTag(t)} size={11} />
-                </button>
-                {t}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function TagBudgetsPanel({ tagSpendingData }) {
-  const year = new Date().getFullYear()
-  const [budgets, setBudgets]       = useState([])
-  const [loading, setLoading]       = useState(true)
-  const [tagInput, setTagInput]     = useState('')
-  const [amountInput, setAmountInput] = useState('')
-  const [saving, setSaving]         = useState(false)
-
-  useEffect(() => {
-    setLoading(true)
-    api.tagBudgets(year)
-      .then(data => setBudgets(Array.isArray(data) ? data : []))
-      .catch(() => setBudgets([]))
-      .finally(() => setLoading(false))
-  }, [year])
-
-  const spendMap = Object.fromEntries((tagSpendingData ?? []).map(d => [d.tag.toLowerCase(), d.total]))
-
-  async function handleAdd(e) {
-    e.preventDefault()
-    const tag = normalizeTag(tagInput)
-    const amount = Math.max(0, Number(amountInput) || 0)
-    if (!tag) return
-    setSaving(true)
-    try {
-      await api.upsertTagBudget({ tag, year, month: 0, amount })
-      setBudgets(prev => {
-        const existing = prev.findIndex(b => b.tag.toLowerCase() === tag.toLowerCase() && b.month === 0)
-        if (existing >= 0) {
-          const next = [...prev]; next[existing] = { ...next[existing], amount }; return next
-        }
-        return [...prev, { tag, year, month: 0, amount }]
-      })
-      setTagInput('')
-      setAmountInput('')
-    } catch { /* silent */ }
-    finally { setSaving(false) }
-  }
-
-  const basebudgets = budgets.filter(b => b.month === 0)
-
-  return (
-    <div className="card">
-      <div className="card-title">Presupuesto por Tag</div>
-      {loading ? <Spinner /> : (
-        <>
-          {basebudgets.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
-              {basebudgets.map(b => {
-                const spent = spendMap[b.tag.toLowerCase()] ?? 0
-                const pct   = b.amount > 0 ? Math.min(100, +(spent / b.amount * 100).toFixed(1)) : 0
-                const color = getCatColor(b.tag)
-                const over  = spent > b.amount && b.amount > 0
-                return (
-                  <div key={b.tag}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                      <CatIcon name={b.tag} size={12} />
-                      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', flex: 1, letterSpacing: '0.04em' }}>{b.tag}</span>
-                      <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: over ? 'var(--red)' : color }}>
-                        {formatCLP(spent)} / {formatCLP(b.amount)}
-                      </span>
-                    </div>
-                    <div style={{ height: 3, background: 'rgba(255,255,255,.05)', borderRadius: 2, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${pct}%`, background: over ? 'var(--red)' : color, borderRadius: 2 }} />
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-          <form onSubmit={handleAdd} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <input
-              className="finput"
-              placeholder="Tag"
-              value={tagInput}
-              onChange={e => setTagInput(e.target.value)}
-              style={{ flex: 1, fontSize: 11, boxSizing: 'border-box' }}
-            />
-            <div style={{ position: 'relative', flexShrink: 0 }}>
-              <input
-                type="number"
-                className="finput"
-                placeholder="0"
-                value={amountInput}
-                onChange={e => setAmountInput(e.target.value)}
-                style={{ fontFamily: 'var(--mono)', fontSize: 11, paddingRight: 30, width: 90, boxSizing: 'border-box' }}
-              />
-              <span style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', fontSize: 9, color: 'var(--text-dim)', pointerEvents: 'none' }}>CLP</span>
-            </div>
-            <button type="submit" className="btn-gold" disabled={saving} style={{ fontSize: 11, padding: '5px 10px', flexShrink: 0 }}>+</button>
-          </form>
-        </>
-      )}
-    </div>
-  )
-}
-
-function BudgetsPanel({ recognizedTags, tagsLoaded }) {
-  const year = new Date().getFullYear()
-  const budgetCats = recognizedTags.filter(c => !INCOME_TAGS.includes(c))
-
-  const [limits, setLimits]         = useState({})
-  const [customCats, setCustomCats] = useState([])
-  const [loading, setLoading]       = useState(true)
-  const [saving, setSaving]         = useState(false)
-  const [saved, setSaved]           = useState(false)
-
-  useEffect(() => {
-    if (!tagsLoaded) return
-    setLoading(true)
-    api.budgets(year)
-      .then(data => {
-        const arr = Array.isArray(data) ? data : []
-        setLimits(parseBudgets(arr, recognizedTags))
-        const custom = arr
-          .filter(b => b.month === 0 && !recognizedTags.includes(b.category))
-          .map((b, i) => ({ id: Date.now() + i, name: b.category }))
-        setCustomCats(custom)
-      })
-      .catch(() => { const d = {}; for (const c of recognizedTags) d[c] = 0; setLimits(d) })
-      .finally(() => setLoading(false))
-  }, [year, tagsLoaded, recognizedTags.join(',')])
-
-  function setLimit(cat, value) {
-    setLimits(prev => ({ ...prev, [cat]: Math.max(0, Number(value) || 0) }))
-  }
-
-  function addCustomCat() {
-    setCustomCats(prev => [...prev, { id: Date.now(), name: '' }])
-  }
-
-  function renameCustomCat(id, newName) {
-    const oldName = customCats.find(c => c.id === id)?.name
-    setCustomCats(prev => prev.map(c => c.id === id ? { ...c, name: newName } : c))
-    if (oldName !== undefined && oldName !== newName) {
-      setLimits(prev => {
-        const n = { ...prev, [newName]: prev[oldName] ?? 0 }
-        if (oldName) delete n[oldName]
-        return n
-      })
-    }
-  }
-
-  function removeCustomCat(id, name) {
-    setCustomCats(prev => prev.filter(c => c.id !== id))
-    setLimits(prev => { const n = { ...prev }; delete n[name]; return n })
-  }
-
-  const allCats = [...budgetCats, ...customCats.map(c => c.name).filter(Boolean)]
-  const total   = allCats.reduce((s, c) => s + (limits[c] ?? 0), 0)
-
-  async function handleSave() {
-    setSaving(true)
-    setSaved(false)
-    try {
-      const budgets = [
-        ...recognizedTags.map(cat => ({ category: cat, amount: limits[cat] ?? 0 })),
-        ...customCats.filter(c => c.name).map(c => ({ category: c.name, amount: limits[c.name] ?? 0 })),
-      ]
-      await api.upsertBudgetsBase({ year, budgets })
-      clearTagsCache()
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2500)
-    } catch { /* silent */ }
-    finally { setSaving(false) }
-  }
-
-  return (
-    <div className="card">
-      <div className="card-title">Presupuestos base</div>
-      {loading ? <Spinner /> : (
-        <>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
-            {budgetCats.map(cat => (
-              <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <CatIcon name={cat} size={13} style={{ flexShrink: 0 }} />
-                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', flex: 1, letterSpacing: '0.04em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat}</div>
-                <div style={{ position: 'relative', flexShrink: 0 }}>
-                  <input type="number" className="finput" placeholder="0"
-                    value={limits[cat] || ''}
-                    onChange={e => setLimit(cat, e.target.value)}
-                    style={{ fontFamily: 'var(--mono)', fontSize: 12, paddingRight: 30, width: 100, boxSizing: 'border-box' }} />
-                  <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 9, color: 'var(--text-dim)', pointerEvents: 'none' }}>CLP</span>
-                </div>
-              </div>
-            ))}
-            {customCats.map(({ id, name }) => (
-              <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <CatIcon name={name || 'custom'} size={13} style={{ flexShrink: 0 }} />
-                <input type="text" className="finput" placeholder="Categoría"
-                  value={name}
-                  onChange={e => renameCustomCat(id, e.target.value)}
-                  style={{ fontSize: 11, flex: 1, width: 0, boxSizing: 'border-box', letterSpacing: '0.04em' }} />
-                <div style={{ position: 'relative', flexShrink: 0 }}>
-                  <input type="number" className="finput" placeholder="0"
-                    value={(name && limits[name]) || ''}
-                    onChange={e => name && setLimit(name, e.target.value)}
-                    style={{ fontFamily: 'var(--mono)', fontSize: 12, paddingRight: 30, width: 100, boxSizing: 'border-box' }} />
-                  <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 9, color: 'var(--text-dim)', pointerEvents: 'none' }}>CLP</span>
-                </div>
-                <button onClick={() => removeCustomCat(id, name)} style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: 14, padding: '0 2px', flexShrink: 0 }}>×</button>
-              </div>
-            ))}
-          </div>
-
-          <button onClick={addCustomCat} style={{ marginTop: 8, background: 'none', border: '1px dashed var(--border)', borderRadius: 6, color: 'var(--text-dim)', cursor: 'pointer', fontSize: 11, padding: '4px 12px' }}>
-            + Agregar categoría
-          </button>
-
-          <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-              Total: <span style={{ fontFamily: 'var(--mono)', color: 'var(--accent)', fontWeight: 600 }}>{formatCLP(total)}</span>
-            </div>
-            <button className="btn-gold" onClick={handleSave} disabled={saving} style={{ fontSize: 12, padding: '6px 14px' }}>
-              {saving ? 'Guardando…' : saved ? '✓ Guardado' : 'Guardar'}
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-const PAGE_SIZE = 25
-
-export default function Categories() {
-  const now = new Date()
-  const { selectedId } = useAccount()
-  const { recognized, usedTags, personal, personalEntries, loaded: tagsLoaded } = useTags()
-  const [period, setPeriod] = useState('month')
-  const [year, setYear]     = useState(now.getFullYear())
-  const [month, setMonth]   = useState(now.getMonth() + 1)
-  const [data, setData]     = useState([])
-  const [loading, setLoading]       = useState(true)
-  const [selTag, setSelTag]         = useState(null)
-  const [tagMovs, setTagMovs]       = useState([])
-  const [tagLoading, setTagLoading] = useState(false)
-  const [page, setPage]             = useState(0)
-
-  useEffect(() => {
-    setLoading(true)
-    setPage(0)
-    setSelTag(null)
-    const params = { year }
-    if (period === 'month') params.month = month
-    if (selectedId) params.account_id = selectedId
-    api.tagSpending(params)
-      .then(res => setData(Array.isArray(res) ? res.filter(d => d.total > 0) : []))
-      .catch(() => setData([]))
-      .finally(() => setLoading(false))
-  }, [period, month, year, selectedId])
-
-  useEffect(() => {
-    if (!selTag) { setTagMovs([]); return }
-    setTagLoading(true)
-    const params = { tags: selTag.toLowerCase(), year }
-    if (period === 'month') params.month = month
-    if (selectedId) params.account_id = selectedId
-    api.transactions(params)
-      .then(d => setTagMovs(Array.isArray(d) ? d : (d?.transactions ?? [])))
-      .catch(() => setTagMovs([]))
-      .finally(() => setTagLoading(false))
-  }, [selTag, period, month, year, selectedId])
-
-  function prevPeriod() {
-    if (period === 'month') { if (month === 1) { setMonth(12); setYear(y => y - 1) } else setMonth(m => m - 1) }
-    else setYear(y => y - 1)
-  }
-  function nextPeriod() {
-    if (period === 'month') { if (month === 12) { setMonth(1); setYear(y => y + 1) } else setMonth(m => m + 1) }
-    else setYear(y => y + 1)
-  }
-
-  const total      = data.reduce((s, d) => s + d.total, 0)
-  const totalPages = Math.ceil(data.length / PAGE_SIZE)
-  const pageData   = data.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
-  const pieData    = data.slice(0, 10).map(d => ({ name: d.tag, value: d.total, fill: getCatColor(d.tag) }))
-  const periodLabel = period === 'month' ? `${MONTHS[month - 1]} ${year}` : `${year}`
-
-  return (
-    <div className="fade">
+      {/* Header */}
       <div className="ph" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <div className="ph-title">Tags</div>
-          <div className="ph-sub">{periodLabel} · {formatCLP(total)} total · {data.length} tags</div>
+          <div className="ph-sub">
+            {view === 'month' ? `${MONTH_ABBR[month - 1]} ${year}` : year} · {allTags.length} tags
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {addingTag ? (
+            <AddTagForm onAdd={handleAddTag} onCancel={() => setAddingTag(false)} />
+          ) : (
+            <button
+              onClick={() => setAddingTag(true)}
+              style={{ background: 'none', border: '1px dashed var(--border)', borderRadius: 6, color: 'var(--text-dim)', cursor: 'pointer', fontSize: 12, padding: '6px 12px' }}
+            >
+              + Nuevo tag
+            </button>
+          )}
           <div className="toggle" style={{ width: 'auto' }}>
-            {[['month','Mes'],['year','Año']].map(([p, l]) => (
-              <button key={p} className={`tbtn${period === p ? ' ti' : ''}`} onClick={() => setPeriod(p)} style={{ padding: '7px 16px' }}>{l}</button>
+            {[['month', 'Mes'], ['year', 'Año']].map(([v, l]) => (
+              <button key={v} className={`tbtn${view === v ? ' ti' : ''}`} onClick={() => setView(v)} style={{ padding: '7px 16px' }}>{l}</button>
             ))}
           </div>
           <button className="nav-arrow" onClick={prevPeriod}>‹</button>
-          <span style={{ fontSize: 13, fontWeight: 600, minWidth: 100, textAlign: 'center' }}>
-            {period === 'month' ? `${MONTH_ABBR[month - 1]} ${year}` : year}
+          <span style={{ fontSize: 13, fontWeight: 600, minWidth: 80, textAlign: 'center' }}>
+            {view === 'month' ? `${MONTH_ABBR[month - 1]} ${year}` : year}
           </span>
           <button className="nav-arrow" onClick={nextPeriod}>›</button>
         </div>
       </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-start' }}>
-        {/* LEFT: tag spending */}
-        <div style={{ flex: '1 1 500px', minWidth: 0 }}>
-          {loading ? <Spinner /> : data.length === 0 ? (
-            <div className="empty-msg" style={{ marginTop: 80 }}>Sin egresos en este período</div>
-          ) : (
-            <>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 14, marginBottom: 14 }}>
-                <div className="card">
-                  <div className="card-title">Tags — haz clic para ver detalle</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {pageData.map(tag => {
-                      const p = total > 0 ? +(tag.total / total * 100).toFixed(1) : 0
-                      const active = selTag === tag.tag
-                      const color = getCatColor(tag.tag)
-                      return (
-                        <div key={tag.tag}
-                          onClick={() => setSelTag(active ? null : tag.tag)}
-                          style={{ padding: '10px 12px', background: active ? color + '1a' : 'var(--surface2)', border: `1px solid ${active ? color + '55' : 'var(--border)'}`, borderRadius: 8, cursor: 'pointer', transition: 'all .15s' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <CatIcon name={tag.tag} size={14} />
-                              <span style={{ fontSize: 12, fontWeight: 700, color: active ? color : 'var(--text)', letterSpacing: '0.04em' }}>{tag.tag}</span>
-                              <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>{tag.transactions}×</span>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{p}%</span>
-                              <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: color, fontWeight: 500 }}>{formatCLP(tag.total)}</span>
-                            </div>
-                          </div>
-                          <div style={{ height: 3, background: 'rgba(255,255,255,.05)', borderRadius: 2, overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${p}%`, background: color, borderRadius: 2, opacity: .75 }} />
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                  {totalPages > 1 && (
-                    <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginTop: 14, flexWrap: 'wrap' }}>
-                      <button className="tbtn" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0} style={{ padding: '4px 10px', opacity: page === 0 ? .4 : 1 }}>‹</button>
-                      {Array.from({ length: totalPages }, (_, i) => (
-                        <button key={i} className={`tbtn${page === i ? ' ti' : ''}`} onClick={() => setPage(i)} style={{ padding: '4px 10px', minWidth: 32 }}>{i + 1}</button>
-                      ))}
-                      <button className="tbtn" onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page === totalPages - 1} style={{ padding: '4px 10px', opacity: page === totalPages - 1 ? .4 : 1 }}>›</button>
-                    </div>
-                  )}
-                </div>
+      {/* Distribución del sueldo */}
+      <SalaryDistBar
+        tags={personalTags}
+        budgets={budgets}
+        spending={spending}
+        salary={salary}
+        onEditSalary={handleSalaryEdit}
+      />
 
-                <div className="card">
-                  <div className="card-title">Distribución (top 10)</div>
-                  <ResponsiveContainer width="100%" height={Math.max(240, Math.min(pieData.length * 26 + 80, 320))}>
-                    <PieChart>
-                      <Pie data={pieData} cx="45%" cy="50%" innerRadius={60} outerRadius={100} dataKey="value" paddingAngle={pieData.length > 1 ? 2 : 0}>
-                        {pieData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
-                      </Pie>
-                      <Tooltip content={<PieTooltip />} />
-                      <Legend layout="vertical" align="right" verticalAlign="middle"
-                        wrapperStyle={{ fontSize: 11, color: 'var(--text-muted)', paddingLeft: 8 }} iconSize={9} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {selTag && (
-                <div className="card fade" key={selTag}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                    <CatIcon name={selTag} size={18} />
-                    <div className="card-title" style={{ marginBottom: 0, color: getCatColor(selTag) }}>{selTag}</div>
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 4 }}>
-                      {tagMovs.filter(m => m.flow !== 'INCOME').length} movimientos · {formatCLP(data.find(d => d.tag === selTag)?.total ?? 0)}
-                    </span>
-                    <button onClick={() => setSelTag(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text-dim)', fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>×</button>
-                  </div>
-                  {tagLoading ? <Spinner /> : (
-                    <div className="tbl-wrap" style={{ border: 'none', background: 'transparent' }}>
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Fecha</th>
-                            <th>Key</th>
-                            <th>Descripción</th>
-                            <th style={{ textAlign: 'right' }}>Monto</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {[...tagMovs].filter(m => m.flow !== 'INCOME').sort((a, b) => b.date.localeCompare(a.date)).map(m => (
-                            <tr key={m.id}>
-                              <td className="td-date">{formatDate(m.date)}</td>
-                              <td style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-dim)' }}>{m.asset ?? '—'}</td>
-                              <td>{m.description}</td>
-                              <td className="td-mono" style={{ textAlign: 'right', color: 'var(--red)', whiteSpace: 'nowrap' }}>-{formatCLP(m.amount)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
+      {/* Grid de cards */}
+      {loading ? <Spinner /> : allTags.length === 0 ? (
+        <div className="empty-msg" style={{ marginTop: 60 }}>
+          Sin tags — agrega uno arriba o importa transacciones.
+        </div>
+      ) : (
+        <>
+          {loadingMonthly && view === 'year' && (
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>Cargando datos anuales…</div>
           )}
-        </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12, marginBottom: 16 }}>
+            {allTags.map(tag => (
+              <TagCard
+                key={tag}
+                tag={tag}
+                icon={iconFor(tag)}
+                budget={budgetFor(tag)}
+                spent={spentFor(tag)}
+                salary={salary}
+                view={view}
+                monthlyValues={monthlyData[lk(tag)] ?? Array(12).fill(0)}
+                currentMonth={month}
+                onEditBudget={handleBudgetEdit}
+                onEditIcon={setPickerTag}
+                onDelete={handleDelete}
+                onSelect={t => setSelectedTag(prev => prev === t ? null : t)}
+                selected={selectedTag === tag}
+              />
+            ))}
+          </div>
 
-        {/* RIGHT: budgets + tags */}
-        <div style={{ flex: '0 0 320px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <BudgetsPanel recognizedTags={recognized} tagsLoaded={tagsLoaded} />
-          <TagBudgetsPanel tagSpendingData={data} />
-          <TagsPanel usedTags={usedTags} initialPersonal={personal} initialPersonalEntries={personalEntries} />
-        </div>
+          {selectedTag && view === 'year' && (
+            <AnnualDetailPanel
+              tag={selectedTag}
+              icon={iconFor(selectedTag)}
+              budget={budgetFor(selectedTag)}
+              monthlyValues={monthlyData[lk(selectedTag)] ?? Array(12).fill(0)}
+              salary={salary}
+              onClose={() => setSelectedTag(null)}
+            />
+          )}
+
+          {selectedTag && view === 'month' && (
+            <SelectedTagPanel
+              tag={selectedTag}
+              year={year}
+              month={month}
+              selectedId={selectedId}
+              color={getCatColor(selectedTag)}
+              icon={iconFor(selectedTag)}
+              total={spentFor(selectedTag)}
+              onClose={() => setSelectedTag(null)}
+            />
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── SelectedTagPanel ──────────────────────────────────────────────────────────
+
+function SelectedTagPanel({ tag, year, month, selectedId, color, icon, total, onClose }) {
+  const [movs, setMovs]     = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    const params = { tags: tag, year, month }
+    if (selectedId) params.account_id = selectedId
+    api.transactions(params)
+      .then(d => setMovs(Array.isArray(d) ? d : (d?.transactions ?? [])))
+      .catch(() => setMovs([]))
+      .finally(() => setLoading(false))
+  }, [tag, year, month, selectedId])
+
+  const expenses = [...movs]
+    .filter(m => m.flow !== 'INCOME')
+    .sort((a, b) => b.date.localeCompare(a.date))
+
+  function fmtDate(iso) {
+    if (!iso) return ''
+    return iso.slice(0, 10).split('-').reverse().join('/')
+  }
+
+  return (
+    <div className="card fade" key={tag}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+        <CatIcon name={tag} overrideIcon={icon} size={18} />
+        <div style={{ fontSize: 14, fontWeight: 700, color }}>{tag}</div>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 4 }}>
+          {expenses.length} movimientos · {formatCLP(total)}
+        </span>
+        <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text-dim)', fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>×</button>
       </div>
+      {loading ? <Spinner /> : (
+        <div className="tbl-wrap" style={{ border: 'none', background: 'transparent' }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Key</th>
+                <th>Descripción</th>
+                <th style={{ textAlign: 'right' }}>Monto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {expenses.map(m => (
+                <tr key={m.id}>
+                  <td className="td-date">{fmtDate(m.date)}</td>
+                  <td style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-dim)' }}>{m.asset ?? '—'}</td>
+                  <td>{m.description}</td>
+                  <td className="td-mono" style={{ textAlign: 'right', color: 'var(--red)', whiteSpace: 'nowrap' }}>-{formatCLP(m.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }

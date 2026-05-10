@@ -1,7 +1,8 @@
+import { memo } from 'react'
 import { getCatIcon } from '../lib/icons'
 import { getCatColor } from '../lib/constants'
 
-export default function CatIcon({
+const CatIcon = memo(function CatIcon({
   name,
   overrideIcon,
   size = 14,
@@ -23,4 +24,6 @@ export default function CatIcon({
       aria-hidden="true"
     />
   )
-}
+})
+
+export default CatIcon

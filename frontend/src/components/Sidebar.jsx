@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { api } from '../api/client'
 import { formatCLP } from '../lib/formatters'
 import { ACCT_COLORS, getBankLabel } from '../lib/constants'
@@ -12,7 +12,7 @@ const FINTSELF_IDS = {
 }
 
 function SyncButton() {
-  const { selectedAccount } = useAccount()
+  const { selectedAccount, notifySynced } = useAccount()
   const [syncing, setSyncing] = useState(false)
   const [status, setStatus] = useState(null) // 'ok' | 'err' | null
 
@@ -26,6 +26,7 @@ function SyncButton() {
     try {
       await api.sync(bankId)
       setStatus('ok')
+      notifySynced()
     } catch {
       setStatus('err')
     } finally {
@@ -147,6 +148,50 @@ function AccountSwitcher() {
   )
 }
 
+function InferenceToggle() {
+  const [enabled, setEnabled] = useState(() => {
+    try {
+      const u = JSON.parse(localStorage.getItem('arasaka_user'))
+      return u?.settings?.inference_enabled !== false
+    } catch { return true }
+  })
+  const [saving, setSaving] = useState(false)
+
+  async function toggle() {
+    const next = !enabled
+    setEnabled(next)
+    setSaving(true)
+    try {
+      const u = JSON.parse(localStorage.getItem('arasaka_user'))
+      const nextSettings = { ...(u?.settings ?? { personal_enabled: true, app_enabled: true }), inference_enabled: next }
+      await api.updateUserSettings(nextSettings)
+      if (u) localStorage.setItem('arasaka_user', JSON.stringify({ ...u, settings: nextSettings }))
+    } catch { setEnabled(!next) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <span style={{ fontSize: 11, color: 'var(--text-dim)', letterSpacing: '0.03em' }}>
+        Inferencia tags
+      </span>
+      <button
+        onClick={toggle}
+        disabled={saving}
+        style={{
+          fontSize: 10, padding: '3px 10px', borderRadius: 4, cursor: saving ? 'default' : 'pointer',
+          fontWeight: 700, border: `1px solid ${enabled ? 'var(--accent)66' : 'var(--border)'}`,
+          background: enabled ? 'var(--accent)22' : 'var(--surface2)',
+          color: enabled ? 'var(--accent)' : 'var(--text-dim)',
+          transition: 'all var(--t)',
+        }}
+      >
+        {saving ? '…' : enabled ? 'ON' : 'OFF'}
+      </button>
+    </div>
+  )
+}
+
 export default function Sidebar({ user, onLogout, open, onClose }) {
   return (
     <aside className={`sidebar${open ? ' open' : ''}`}>
@@ -169,6 +214,8 @@ export default function Sidebar({ user, onLogout, open, onClose }) {
           </NavLink>
         ))}
       </nav>
+
+      <InferenceToggle />
 
       <SyncButton />
 

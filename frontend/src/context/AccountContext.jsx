@@ -1,10 +1,11 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../api/client'
 
 const AccountContext = createContext(null)
 
 export function AccountProvider({ children }) {
   const [accounts, setAccounts] = useState([])
+  const [syncVersion, setSyncVersion] = useState(0)
   const [selectedId, setSelectedId] = useState(() => {
     const stored = localStorage.getItem('arasaka_account_id')
     return stored ? parseInt(stored, 10) : null
@@ -24,16 +25,26 @@ export function AccountProvider({ children }) {
     }
   }, [accounts, selectedId])
 
-  function select(id) {
+  const select = useCallback((id) => {
     setSelectedId(id)
     if (id === null) localStorage.removeItem('arasaka_account_id')
     else localStorage.setItem('arasaka_account_id', String(id))
-  }
+  }, [])
 
-  const selectedAccount = accounts.find(a => a.id === selectedId) ?? null
+  const selectedAccount = useMemo(
+    () => accounts.find(a => a.id === selectedId) ?? null,
+    [accounts, selectedId]
+  )
+
+  const notifySynced = useCallback(() => setSyncVersion(v => v + 1), [])
+
+  const contextValue = useMemo(
+    () => ({ accounts, selectedAccount, selectedId, select, reload, syncVersion, notifySynced }),
+    [accounts, selectedAccount, selectedId, select, reload, syncVersion, notifySynced]
+  )
 
   return (
-    <AccountContext.Provider value={{ accounts, selectedAccount, selectedId, select, reload }}>
+    <AccountContext.Provider value={contextValue}>
       {children}
     </AccountContext.Provider>
   )

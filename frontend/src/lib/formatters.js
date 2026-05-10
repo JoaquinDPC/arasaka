@@ -1,16 +1,20 @@
+const _clpFmt = new Intl.NumberFormat('es-CL', {
+  style: 'currency',
+  currency: 'CLP',
+  maximumFractionDigits: 0,
+})
+
+const _pctFmt = new Intl.NumberFormat('es-CL', {
+  style: 'percent',
+  maximumFractionDigits: 1,
+})
+
 export function formatCLP(amount) {
-  return new Intl.NumberFormat('es-CL', {
-    style: 'currency',
-    currency: 'CLP',
-    maximumFractionDigits: 0,
-  }).format(amount ?? 0)
+  return _clpFmt.format(amount ?? 0)
 }
 
 export function formatPct(ratio) {
-  return new Intl.NumberFormat('es-CL', {
-    style: 'percent',
-    maximumFractionDigits: 1,
-  }).format(ratio ?? 0)
+  return _pctFmt.format(ratio ?? 0)
 }
 
 export function formatDate(isoString) {
