@@ -6,13 +6,17 @@ import { MONTH_ABBR } from '../lib/constants'
 import Spinner from '../components/Spinner'
 import CatIcon from '../components/CatIcon'
 import { useAccount } from '../context/AccountContext'
+import { InfoTooltip, InsightExplain } from '../components/InfoTooltip'
 
-function InsightRow({ icon, label, value, sub, good }) {
+function InsightRow({ icon, label, value, sub, good, tooltip }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)', position: 'relative', overflow: 'visible' }}>
       <span style={{ fontSize: 15, width: 22, textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>{icon}</span>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>{label}</div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500, display: 'flex', alignItems: 'center' }}>
+          {label}
+          {tooltip && <InfoTooltip title={label} width={300}>{tooltip}</InfoTooltip>}
+        </div>
         <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 1 }}>{sub}</div>
       </div>
       <div style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600, color: good ? 'var(--green)' : 'var(--red)', whiteSpace: 'nowrap' }}>
@@ -44,9 +48,9 @@ function ChartTooltip({ active, payload, label }) {
 
 export default function Annual() {
   const { selectedId } = useAccount()
-  const [year, setYear]       = useState(new Date().getFullYear())
-  const [data, setData]       = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [year, setYear]                 = useState(new Date().getFullYear())
+  const [data, setData]                 = useState(null)
+  const [loading, setLoading]           = useState(true)
 
   useEffect(() => {
     setLoading(true)
@@ -105,7 +109,19 @@ export default function Annual() {
         <div className="stat"><div className="stat-lbl">Ingresos {year}</div><div className="stat-val" style={{ color: 'var(--green)', fontSize: 17 }}>{formatCLP(income)}</div></div>
         <div className="stat"><div className="stat-lbl">Egresos {year}</div><div className="stat-val" style={{ color: 'var(--red)', fontSize: 17 }}>{formatCLP(expenses)}</div></div>
         <div className="stat"><div className="stat-lbl">Inversiones</div><div className="stat-val" style={{ color: '#4cb8af', fontSize: 17 }}>{formatCLP(investments)}</div></div>
-        <div className="stat" style={{ borderColor: 'rgba(201,168,76,.25)' }}><div className="stat-lbl">Balance neto</div><div className="stat-val" style={{ color: balNeto >= 0 ? 'var(--accent)' : 'var(--red)', fontSize: 17 }}>{formatCLP(balNeto)}</div></div>
+        <div className="stat" style={{ borderColor: 'rgba(201,168,76,.25)' }}>
+          <div className="stat-lbl" style={{ display: 'flex', alignItems: 'center' }}>
+            Balance neto
+            <InfoTooltip title="Balance neto" width={280}>
+              <InsightExplain
+                desc="Ingresos del año menos egresos del año. Positivo significa que gastaste menos de lo que ganaste."
+                formula="Ingresos YTD − Egresos YTD"
+                note="No confundir con patrimonio: el balance neto es solo el flujo del período, no tu riqueza total."
+              />
+            </InfoTooltip>
+          </div>
+          <div className="stat-val" style={{ color: balNeto >= 0 ? 'var(--accent)' : 'var(--red)', fontSize: 17 }}>{formatCLP(balNeto)}</div>
+        </div>
       </div>
 
       {loading ? <Spinner /> : (
@@ -156,36 +172,81 @@ export default function Annual() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <InsightRow icon="%" label="Tasa de ahorro" value={`${pctAhorro}%`}
                   sub={pctAhorro >= 20 ? 'Sobre el 20% — excelente' : 'Por debajo del objetivo del 20%'}
-                  good={pctAhorro >= 20} />
+                  good={pctAhorro >= 20}
+                  tooltip={<InsightExplain
+                    desc={<>Porcentaje de tus ingresos que <span style={{ color: 'var(--accent)' }}>no gastaste</span> en el año. Mide cuánto dinero realmente queda libre.</>}
+                    formula="(Ingresos − Egresos) / Ingresos × 100"
+                    ranges={[
+                      { color: 'green',  range: '≥ 20%',  label: 'Excelente' },
+                      { color: 'orange', range: '10–20%', label: 'Aceptable' },
+                      { color: 'red',    range: '< 10%',  label: 'Riesgoso' },
+                    ]}
+                    note="Regla 50/30/20: ahorrar al menos 20% es lo recomendado."
+                  />} />
                 <InsightRow icon="⌂" label="Costo de vida / ingresos" value={`${pctVida}%`}
                   sub={pctVida <= 50 ? 'Bajo control — regla del 50%' : 'Por encima del 50% recomendado'}
-                  good={pctVida <= 50} />
+                  good={pctVida <= 50}
+                  tooltip={<InsightExplain
+                    desc="Qué porcentaje de tus ingresos se va en gastos corrientes (vivienda, alimentación, transporte, etc.)."
+                    formula="Egresos / Ingresos × 100"
+                    ranges={[
+                      { color: 'green',  range: '≤ 50%',  label: 'Bajo control' },
+                      { color: 'orange', range: '50–70%', label: 'Ajustado' },
+                      { color: 'red',    range: '> 70%',  label: 'Crítico' },
+                    ]}
+                    note="En ciudades caras puede ser difícil bajar del 50%, pero es el techo recomendado."
+                  />} />
                 <InsightRow icon="↑" label="% invertido" value={`${pctInvPct}%`}
                   sub={pctInvPct >= 20 ? 'Sobre el 20% — muy bien' : 'Regla del 20% en inversiones'}
-                  good={pctInvPct >= 20} />
+                  good={pctInvPct >= 20}
+                  tooltip={<InsightExplain
+                    desc="Porcentaje de tus ingresos destinado a inversiones (fondos, acciones, APV, criptos, etc.)."
+                    formula="Inversiones / Ingresos × 100"
+                    ranges={[
+                      { color: 'green',  range: '≥ 20%',  label: 'Excelente' },
+                      { color: 'orange', range: '10–20%', label: 'Aceptable' },
+                      { color: 'red',    range: '< 10%',  label: 'Insuficiente' },
+                    ]}
+                    note="Junto con la tasa de ahorro, el indicador más importante de salud financiera a largo plazo."
+                  />} />
                 {bestIdx >= 0 && months[bestIdx] && (
                   <InsightRow icon="★" label="Mejor mes"
                     value={MONTHS_ARR[months[bestIdx].month - 1] ?? '—'}
                     sub={`Flujo: +${formatCLP(monthFlows[bestIdx])}`}
-                    good={true} />
+                    good={true}
+                    tooltip={<InsightExplain
+                      desc="El mes del año con mayor flujo positivo neto."
+                      formula="Flujo = Ingresos − Egresos del mes"
+                      note="Útil para identificar qué meses tienen ingresos extraordinarios o gastos bajos."
+                    />} />
                 )}
                 {worstIdx >= 0 && months[worstIdx] && (
                   <InsightRow icon="▼" label="Mes más caro"
                     value={MONTHS_ARR[months[worstIdx].month - 1] ?? '—'}
                     sub={`Flujo: ${formatCLP(monthFlows[worstIdx])}`}
-                    good={monthFlows[worstIdx] >= 0} />
+                    good={monthFlows[worstIdx] >= 0}
+                    tooltip={<InsightExplain
+                      desc="El mes con mayor gasto o peor flujo neto del año."
+                      note="Detectarlo permite planificarlo mejor el año siguiente: ¿gasto puntual grande? ¿Fiestas? ¿Vacaciones? Anticipa y reserva."
+                    />} />
                 )}
                 {remMonths > 0 && (
                   <InsightRow icon="→" label={`Proyección ${year}`}
                     value={formatCLP(projSaldo)}
                     sub={`Estimado al 31/12 (${remMonths} meses restantes)`}
-                    good={projSaldo >= netWorth} />
+                    good={projSaldo >= netWorth}
+                    tooltip={<InsightExplain
+                      desc="Estimación de tu patrimonio neto al 31/12 basada en el flujo mensual promedio de los meses activos."
+                      formula={`Patrimonio actual + (flujo promedio × ${remMonths} meses)`}
+                      note="Proyección lineal, no garantizada. Si el flujo mejora, la proyección sube."
+                    />} />
                 )}
               </div>
             </div>
           </div>
         </>
       )}
+
     </div>
   )
 }

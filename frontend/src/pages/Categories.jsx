@@ -5,6 +5,7 @@ import { getCatColor, MONTH_ABBR } from '../lib/constants'
 import { useTags, clearTagsCache } from '../lib/useTags'
 import Spinner from '../components/Spinner'
 import CatIcon from '../components/CatIcon'
+import ConfirmDialog from '../components/ConfirmDialog'
 import { useAccount } from '../context/AccountContext'
 import { ICON_BY_NAME } from '../lib/icons'
 
@@ -305,12 +306,22 @@ function TagCard({
               onBlur={commitBudget}
               onKeyDown={e => { if (e.key === 'Enter') commitBudget(); if (e.key === 'Escape') setEditingBudget(false) }}
               onClick={e => e.stopPropagation()}
-              style={{ fontFamily: 'var(--mono)', fontSize: 12, width: 90, boxSizing: 'border-box' }}
+              style={{ fontFamily: 'var(--mono)', fontSize: 12, width: 90, boxSizing: 'border-box', padding: '2px 6px', borderRadius: 4 }}
             />
           ) : (
             <button
               onClick={startEditBudget}
-              style={{ background: 'none', border: 'none', fontFamily: 'var(--mono)', fontSize: 12, color: budget > 0 ? 'var(--text-muted)' : 'var(--text-dim)', cursor: 'pointer', padding: '1px 3px' }}
+              style={{
+                background: budget > 0 ? 'none' : 'rgba(255,255,255,.04)',
+                border: budget > 0 ? 'none' : '1px dashed var(--border)',
+                borderRadius: 4,
+                fontFamily: 'var(--mono)',
+                fontSize: budget > 0 ? 12 : 11,
+                color: budget > 0 ? 'var(--text-muted)' : 'var(--text-dim)',
+                cursor: 'pointer',
+                padding: budget > 0 ? '1px 3px' : '3px 7px',
+                transition: 'border-color .15s',
+              }}
             >
               {budget > 0 ? formatCLP(budget) : '+ presupuesto'}
             </button>
@@ -463,7 +474,10 @@ export default function Categories() {
   // All maps keyed by lowercase tag
   const [budgets, setBudgets]     = useState({})
   const [spending, setSpending]   = useState({})
+  const [txCount, setTxCount]     = useState({})
   const [monthlyData, setMonthlyData] = useState({})
+  const [tagPage, setTagPage]     = useState(0)
+  const PAGE_SIZE = 12
 
   const [loadingSpend, setLoadingSpend]     = useState(false)
   const [loadingMonthly, setLoadingMonthly] = useState(false)
@@ -473,6 +487,7 @@ export default function Categories() {
   const [pickerTag, setPickerTag] = useState(null)
   const [selectedTag, setSelectedTag] = useState(null)
   const [addingTag, setAddingTag] = useState(false)
+  const [confirmDeleteTag, setConfirmDeleteTag] = useState(null)
 
   // Load tag budgets — normalize keys to lowercase
   useEffect(() => {
@@ -493,14 +508,19 @@ export default function Categories() {
   useEffect(() => {
     setLoadingSpend(true)
     setSelectedTag(null)
+    setTagPage(0)
     const params = { year }
     if (view === 'month') params.month = month
     if (selectedId) params.account_id = selectedId
     api.tagSpending(params)
       .then(data => {
-        const map = {}
-        for (const d of (Array.isArray(data) ? data : [])) map[lk(d.tag)] = d.total
-        setSpending(map)
+        const smap = {}, tmap = {}
+        for (const d of (Array.isArray(data) ? data : [])) {
+          smap[lk(d.tag)] = d.total
+          tmap[lk(d.tag)] = d.transactions
+        }
+        setSpending(smap)
+        setTxCount(tmap)
       })
       .catch(() => {})
       .finally(() => setLoadingSpend(false))
@@ -553,6 +573,12 @@ export default function Categories() {
   }
 
   async function handleDelete(tag) {
+    setConfirmDeleteTag(tag)
+  }
+
+  async function confirmDelete() {
+    const tag = confirmDeleteTag
+    setConfirmDeleteTag(null)
     setEntries(prev => prev.filter(e => e.tag !== tag))
     if (selectedTag === tag) setSelectedTag(null)
     try { await api.deletePersonalTag(tag); clearTagsCache() } catch {}
@@ -578,9 +604,15 @@ export default function Categories() {
     } else setYear(y => y + 1)
   }
 
-  const personalTags    = entries.map(e => e.tag)
+  const personalTags    = entries.map(e => e.tag).filter(t => txFor(t) > 0)
   const spendingOnlyTags = Object.keys(spending).filter(k => !personalTags.some(p => lk(p) === k))
+
+  function txFor(tag)     { return txCount[lk(tag)] ?? 0 }
   const allTags         = [...personalTags, ...spendingOnlyTags]
+    .sort((a, b) => txFor(b) - txFor(a))
+
+  const pageCount   = Math.ceil(allTags.length / PAGE_SIZE)
+  const visibleTags = allTags.slice(tagPage * PAGE_SIZE, (tagPage + 1) * PAGE_SIZE)
 
   function iconFor(tag)   { return entries.find(e => e.tag === tag)?.icon ?? null }
   function budgetFor(tag) { return budgets[lk(tag)] ?? 0 }
@@ -600,12 +632,39 @@ export default function Categories() {
         />
       )}
 
+      <ConfirmDialog
+        open={!!confirmDeleteTag}
+        onClose={() => setConfirmDeleteTag(null)}
+        onConfirm={confirmDelete}
+        title={`Eliminar categoría ${confirmDeleteTag ?? ''}`}
+        message="Esta acción re-asignará todos los movimientos asociados a la categoría OTROS."
+        details={confirmDeleteTag ? [
+          {
+            label: 'Movimientos afectados',
+            value: String(txCount[lk(confirmDeleteTag)] ?? 0),
+            mono: true,
+          },
+          {
+            label: 'Total acumulado',
+            value: formatCLP(spending[lk(confirmDeleteTag)] ?? 0),
+            color: 'var(--red)',
+            mono: true,
+          },
+          {
+            label: 'Nueva categoría',
+            value: 'OTROS',
+            color: 'var(--accent)',
+          },
+        ] : []}
+        confirmLabel="Sí, eliminar"
+      />
+
       {/* Header */}
       <div className="ph" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <div className="ph-title">Tags</div>
           <div className="ph-sub">
-            {view === 'month' ? `${MONTH_ABBR[month - 1]} ${year}` : year} · {allTags.length} tags
+            {view === 'month' ? `${MONTH_ABBR[month - 1]} ${year}` : year} · {allTags.length} tags · más usados primero
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -652,7 +711,7 @@ export default function Categories() {
             <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>Cargando datos anuales…</div>
           )}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12, marginBottom: 16 }}>
-            {allTags.map(tag => (
+            {visibleTags.map(tag => (
               <TagCard
                 key={tag}
                 tag={tag}
@@ -671,6 +730,27 @@ export default function Categories() {
               />
             ))}
           </div>
+
+          {pageCount > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, marginBottom: 16 }}>
+              <button className="nav-arrow" onClick={() => setTagPage(p => Math.max(0, p - 1))} disabled={tagPage === 0}>‹</button>
+              {Array.from({ length: pageCount }, (_, i) => (
+                <button
+                  key={i}
+                  onClick={() => setTagPage(i)}
+                  style={{
+                    fontSize: 12, padding: '4px 9px', borderRadius: 5, border: 'none',
+                    background: tagPage === i ? 'var(--accent)' : 'var(--surface3)',
+                    color: tagPage === i ? '#fff' : 'var(--text-dim)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {i + 1}
+                </button>
+              ))}
+              <button className="nav-arrow" onClick={() => setTagPage(p => Math.min(pageCount - 1, p + 1))} disabled={tagPage === pageCount - 1}>›</button>
+            </div>
+          )}
 
           {selectedTag && view === 'year' && (
             <AnnualDetailPanel

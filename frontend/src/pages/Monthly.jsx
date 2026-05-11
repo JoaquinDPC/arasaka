@@ -7,6 +7,7 @@ import { getCatColor, MONTHS } from '../lib/constants'
 import Spinner from '../components/Spinner'
 import CatIcon from '../components/CatIcon'
 import { useAccount } from '../context/AccountContext'
+import { InfoTooltip, InsightExplain } from '../components/InfoTooltip'
 
 function Ring({ value, max = 100, label, size = 130 }) {
   const r = 48, circ = 2 * Math.PI * r
@@ -29,21 +30,27 @@ function Ring({ value, max = 100, label, size = 130 }) {
 
 function BudgetBar({ cat, spent, budget }) {
   const p = budget > 0 ? Math.min(spent / budget * 100, 100) : 0
-  const over = budget > 0 && spent > budget
-  const bar = over ? 'var(--red)' : p > 80 ? '#d4884c' : 'var(--accent)'
+  const pRaw = budget > 0 ? spent / budget * 100 : 0
+  const barColor = spent === 0 ? '#44444d'
+    : pRaw >= 100 ? 'var(--red)'
+    : pRaw >= 70  ? '#d4a84c'
+    : '#4caf7d'
+  const textColor = spent === 0 ? 'var(--text-dim)'
+    : pRaw >= 100 ? 'var(--red)'
+    : 'var(--text-muted)'
   return (
     <div className="bud-item">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <CatIcon name={cat} size={13} style={{ flexShrink: 0 }} />
-          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.05em' }}>{cat.toUpperCase()}</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: textColor, letterSpacing: '0.05em' }}>{cat.toUpperCase()}</span>
         </div>
-        <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: over ? 'var(--red)' : 'var(--text-muted)' }}>
-          {formatCLP(spent)}{budget > 0 ? ` / ${formatCLP(budget)}` : ''}
+        <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: textColor }}>
+          {formatCLP(spent)} / {formatCLP(budget)}
         </span>
       </div>
       <div style={{ height: 3, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${p}%`, background: bar, borderRadius: 2, transition: 'width .4s ease' }} />
+        <div style={{ height: '100%', width: `${p}%`, background: barColor, borderRadius: 2, transition: 'width .4s ease' }} />
       </div>
     </div>
   )
@@ -113,7 +120,7 @@ export default function Monthly() {
 
   const catData = tagData.slice().sort((a, b) => b.total - a.total)
   const budgetCats = budgets
-    .filter(b => !['sueldo', 'devolucion'].includes(b.category))
+    .filter(b => (b.budget ?? 0) > 0)
     .sort((a, b) => (b.total ?? 0) - (a.total ?? 0))
 
   return (
@@ -136,7 +143,19 @@ export default function Monthly() {
         <div className="stat"><div className="stat-lbl">Egresos</div><div className="stat-val" style={{ color: 'var(--red)', fontSize: 16 }}>{formatCLP(expenses)}</div></div>
         <div className="stat"><div className="stat-lbl">Inversiones</div><div className="stat-val" style={{ color: '#4cb8af', fontSize: 16 }}>{formatCLP(investments)}</div></div>
         <div className="stat"><div className="stat-lbl">Balance de caja</div><div className="stat-val" style={{ color: balance >= 0 ? 'var(--green)' : 'var(--red)', fontSize: 16 }}>{formatCLP(balance)}</div></div>
-        <div className="stat" style={{ borderColor: 'rgba(201,168,76,.25)' }}><div className="stat-lbl">Patrimonio</div><div className="stat-val" style={{ color: 'var(--accent)', fontSize: 16 }}>{formatCLP(netWorth)}</div></div>
+        <div className="stat" style={{ borderColor: 'rgba(201,168,76,.25)' }}>
+          <div className="stat-lbl" style={{ display: 'flex', alignItems: 'center' }}>
+            Patrimonio
+            <InfoTooltip title="Patrimonio" width={280} align="right">
+              <InsightExplain
+                desc={<>El <strong style={{ color: 'var(--text)' }}>valor total acumulado</strong> de tu vida financiera. Refleja todo lo ganado menos todo lo gastado desde el inicio de tu registro.</>}
+                formula="Saldo inicial + Ingresos − Egresos"
+                note="Este valor es acumulado histórico, no solo del mes actual."
+              />
+            </InfoTooltip>
+          </div>
+          <div className="stat-val" style={{ color: 'var(--accent)', fontSize: 16 }}>{formatCLP(netWorth)}</div>
+        </div>
       </div>
 
       {loading ? <Spinner /> : (
@@ -185,7 +204,7 @@ export default function Monthly() {
               <div className="card-title" style={{ marginBottom: 0 }}>Presupuestos mensuales</div>
               <span style={{ fontSize: 11, color: 'var(--text-dim)', cursor: 'pointer' }}
                 onClick={() => navigate('/presupuestos')}>
-                Definir base →
+                Definir presupuestos →
               </span>
             </div>
             <div className="budget-grid">

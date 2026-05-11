@@ -5,6 +5,7 @@ import { getCatColor, MONTHS, getBankLabel } from '../lib/constants'
 import Spinner from '../components/Spinner'
 import CatIcon from '../components/CatIcon'
 import { useAccount } from '../context/AccountContext'
+import { InfoTooltip, InsightExplain } from '../components/InfoTooltip'
 
 function fmtDate(ds) {
   const d = new Date(ds + 'T12:00')
@@ -155,8 +156,17 @@ export default function Home() {
     <div className="fade">
       {/* ── HERO ── */}
       <div style={{ marginBottom: 28 }}>
-        <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', fontWeight: 700, marginBottom: 6 }}>
+        <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', fontWeight: 700, marginBottom: 6, display: 'flex', alignItems: 'center' }}>
           {selectedAccount ? `${getBankLabel(selectedAccount.bank_id)} · ${selectedAccount.name}` : 'Patrimonio total'}
+          {!selectedAccount && (
+            <InfoTooltip title="Patrimonio total" width={300}>
+              <InsightExplain
+                desc={<>El <strong style={{ color: 'var(--text)' }}>valor total acumulado</strong> de tu vida financiera: saldo en cuentas, inversiones y todo lo registrado.</>}
+                formula="Saldo inicial + Ingresos − Egresos"
+                note="Incluye todos los movimientos históricos desde el inicio de tu registro."
+              />
+            </InfoTooltip>
+          )}
         </div>
         <div style={{ fontFamily: 'var(--mono)', fontSize: 'clamp(32px,6vw,48px)', fontWeight: 700, letterSpacing: '-0.02em', color: netWorth >= 0 ? 'var(--accent)' : 'var(--red)', lineHeight: 1 }}>
           {formatCLP(netWorth)}
@@ -179,7 +189,16 @@ export default function Home() {
           <div className="stat-delta"><span style={{ color: '#4cb8af', fontWeight: 700 }}>{pctInv}%</span> de ingresos</div>
         </div>
         <div className="stat" style={{ borderColor: 'rgba(201,168,76,.25)' }}>
-          <div className="stat-lbl">Balance neto</div>
+          <div className="stat-lbl" style={{ display: 'flex', alignItems: 'center' }}>
+            Balance neto
+            <InfoTooltip title="Balance neto" width={280}>
+              <InsightExplain
+                desc="Ingresos del año menos egresos del año. Positivo significa que gastaste menos de lo que ganaste."
+                formula="Ingresos YTD − Egresos YTD"
+                note="No confundir con patrimonio: el balance neto es solo el flujo del período, no tu riqueza total."
+              />
+            </InfoTooltip>
+          </div>
           <div className="stat-val" style={{ color: incomeYtd - expensesYtd >= 0 ? 'var(--accent)' : 'var(--red)', fontSize: 17 }}>
             {formatCLP(incomeYtd - expensesYtd)}
           </div>
