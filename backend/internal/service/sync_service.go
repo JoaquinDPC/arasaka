@@ -70,7 +70,7 @@ func (s *SyncService) Sync(ctx context.Context, bankID string) (importer.Result,
 	return combined, nil
 }
 
-func (s *SyncService) syncBank(ctx context.Context, bankID, user, password, dbBankID string) (importer.Result, error) {
+func (s *SyncService) syncBank(ctx context.Context, bankID, user, password string, dbBankID domain.BankID) (importer.Result, error) {
 	tmpFile, err := os.CreateTemp("", "fintself-*.json")
 	if err != nil {
 		return importer.Result{}, fmt.Errorf("create temp file: %w", err)

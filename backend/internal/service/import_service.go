@@ -13,7 +13,7 @@ import (
 )
 
 // supportedPDFBanks lists the bank_id values that have PDF parsers implemented.
-var supportedPDFBanks = map[string]bool{
+var supportedPDFBanks = map[domain.BankID]bool{
 	domain.BankBancoDeChile: true,
 	domain.BankSantander:    true,
 }
@@ -36,11 +36,11 @@ type FileResult struct {
 
 // BatchResult aggregates the outcome of importing N PDFs for one account.
 type BatchResult struct {
-	AccountID       int64        `json:"account_id"`
-	BankID          string       `json:"bank_id"`
-	Files           []FileResult `json:"files"`
-	TotalImported   int          `json:"total_imported"`
-	TotalDuplicates int          `json:"total_duplicates"`
+	AccountID       int64         `json:"account_id"`
+	BankID          domain.BankID `json:"bank_id"`
+	Files           []FileResult  `json:"files"`
+	TotalImported   int           `json:"total_imported"`
+	TotalDuplicates int           `json:"total_duplicates"`
 }
 
 // ImportService handles PDF cartola imports.
@@ -58,7 +58,7 @@ func NewImportService(db *sql.DB, inferenceSvc *TagInferenceService) *ImportServ
 // file independently. A failure on one file does not abort the rest.
 func (s *ImportService) ImportPDFs(ctx context.Context, userID, accountID int64, files []NamedPDF) (BatchResult, error) {
 	// ── Ownership check (user-scoped) ─────────────────────────────────────────
-	var bankID string
+	var bankID domain.BankID
 	var dbUserID sql.NullInt64
 	row := s.db.QueryRowContext(ctx,
 		`SELECT bank_id, user_id FROM accounts WHERE id = $1`, accountID)
@@ -95,7 +95,7 @@ func (s *ImportService) importOne(
 	ctx context.Context,
 	txRepo domain.TransactionRepository,
 	userID, accountID int64,
-	bankID string,
+	bankID domain.BankID,
 	f NamedPDF,
 ) FileResult {
 	fr := FileResult{Filename: f.Filename}
@@ -155,7 +155,7 @@ func (s *ImportService) importOne(
 }
 
 // parsePDF dispatches to the bank-specific parser.
-func parsePDF(bankID string, data []byte) (pdfparser.ParseResult, error) {
+func parsePDF(bankID domain.BankID, data []byte) (pdfparser.ParseResult, error) {
 	switch bankID {
 	case domain.BankSantander:
 		return pdfparser.ParseSantander(data)

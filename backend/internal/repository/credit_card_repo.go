@@ -81,12 +81,13 @@ func (r *creditCardRepo) CreateItemsBatch(ctx context.Context, items []domain.Cr
 	return imported, duplicates, tx.Commit()
 }
 
-func (r *creditCardRepo) ListStatements(ctx context.Context) ([]domain.CreditCardStatement, error) {
+func (r *creditCardRepo) ListStatements(ctx context.Context, userID int64) ([]domain.CreditCardStatement, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, external_account_id, period_from, period_to, due_date, currency, total_amount, min_payment, account_id, user_id, created_at
 		FROM credit_card_statements
+		WHERE user_id = $1
 		ORDER BY period_to DESC, external_account_id
-	`)
+	`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -106,12 +107,12 @@ func (r *creditCardRepo) ListStatements(ctx context.Context) ([]domain.CreditCar
 	return stmts, nil
 }
 
-func (r *creditCardRepo) GetStatementByID(ctx context.Context, id int64) (domain.CreditCardStatement, error) {
+func (r *creditCardRepo) GetStatementByID(ctx context.Context, id int64, userID int64) (domain.CreditCardStatement, error) {
 	var s domain.CreditCardStatement
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, external_account_id, period_from, period_to, due_date, currency, total_amount, min_payment, account_id, user_id, created_at
-		FROM credit_card_statements WHERE id = $1
-	`, id).Scan(&s.ID, &s.ExternalAccountID, &s.PeriodFrom, &s.PeriodTo, &s.DueDate, &s.Currency, &s.TotalAmount, &s.MinPayment, &s.AccountID, &s.UserID, &s.CreatedAt)
+		FROM credit_card_statements WHERE id = $1 AND user_id = $2
+	`, id, userID).Scan(&s.ID, &s.ExternalAccountID, &s.PeriodFrom, &s.PeriodTo, &s.DueDate, &s.Currency, &s.TotalAmount, &s.MinPayment, &s.AccountID, &s.UserID, &s.CreatedAt)
 	if err == sql.ErrNoRows {
 		return domain.CreditCardStatement{}, fmt.Errorf("not found")
 	}

@@ -65,6 +65,7 @@ func main() {
 	reportRepo := repository.NewReportRepository(db)
 	appTagRuleRepo := repository.NewAppTagRuleRepository(db)
 	tagHistoryRepo := repository.NewUserTagHistoryRepository(db)
+	ccRepo := repository.NewCreditCardRepository(db)
 
 	// ── Services (business logic) ──────────────────────────────────────────────────────────
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
@@ -75,6 +76,7 @@ func main() {
 	reportSvc := service.NewReportService(reportRepo)
 	syncSvc := service.NewSyncService(db, cfg.BancochileUser, cfg.BancochilePassword, cfg.SantanderUser, cfg.SantanderPassword, inferenceSvc, log)
 	importSvc := service.NewImportService(db, inferenceSvc)
+	ccSvc := service.NewCreditCardService(ccRepo, db)
 
 	// ── Controllers (HTTP handlers) ──────────────────────────────────────────────────────────
 	ctrl := Controllers{
@@ -87,6 +89,7 @@ func main() {
 		Sync:         controller.NewSyncController(syncSvc),
 		Import:       controller.NewImportController(importSvc),
 		Inference:    controller.NewInferenceController(inferenceSvc, userRepo),
+		CreditCard:   controller.NewCreditCardController(ccSvc),
 	}
 
 	gin.SetMode(gin.ReleaseMode)

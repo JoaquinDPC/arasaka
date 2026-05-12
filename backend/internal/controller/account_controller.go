@@ -31,10 +31,10 @@ func (ctrl *AccountController) List(c *gin.Context) {
 }
 
 type createAccountReq struct {
-	BankID string `json:"bank_id" binding:"required"`
-	Name     string `json:"name"      binding:"required"`
-	Type     string `json:"type"`
-	Currency string `json:"currency"`
+	BankID   domain.BankID `json:"bank_id" binding:"required"`
+	Name     string        `json:"name"    binding:"required"`
+	Type     string        `json:"type"`
+	Currency string        `json:"currency"`
 }
 
 func (ctrl *AccountController) Create(c *gin.Context) {
@@ -43,9 +43,13 @@ func (ctrl *AccountController) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if !req.BankID.Valid() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid bank_id"})
+		return
+	}
 	a, err := ctrl.svc.Create(c.Request.Context(), domain.CreateAccountParams{
 		UserID:   c.GetInt64(middleware.UserIDKey),
-		BankID: req.BankID,
+		BankID:   req.BankID,
 		Name:     req.Name,
 		Type:     req.Type,
 		Currency: req.Currency,
@@ -58,9 +62,9 @@ func (ctrl *AccountController) Create(c *gin.Context) {
 }
 
 type updateAccountReq struct {
-	BankID *string `json:"bank_id"`
-	Name     *string `json:"name"`
-	Type     *string `json:"type"`
+	BankID *domain.BankID `json:"bank_id"`
+	Name   *string        `json:"name"`
+	Type   *string        `json:"type"`
 }
 
 func (ctrl *AccountController) Update(c *gin.Context) {
@@ -72,6 +76,10 @@ func (ctrl *AccountController) Update(c *gin.Context) {
 	var req updateAccountReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.BankID != nil && !req.BankID.Valid() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid bank_id"})
 		return
 	}
 	a, err := ctrl.svc.Update(c.Request.Context(), id, domain.UpdateAccountParams{

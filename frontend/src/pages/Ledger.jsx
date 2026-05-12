@@ -8,6 +8,7 @@ import Spinner from '../components/Spinner'
 import CatIcon from '../components/CatIcon'
 import CustomSelect from '../components/CustomSelect'
 import DatePicker from '../components/DatePicker'
+import CCStatementSection from '../components/CCStatementSection'
 import { useAccount } from '../context/AccountContext'
 
 // Tags stored as "First-letter-uppercase-rest-lowercase" (e.g. "Sueldo", "Comida-mascota").
@@ -411,6 +412,7 @@ function EditModal({ tx, onClose, onUpdate, recognizedTags, usedTags }) {
               onChange={e => set('notes', e.target.value)} style={{ resize: 'vertical', fontFamily: 'var(--font)' }} />
           </div>
         </div>
+        {tx.cc_statement_id && <CCStatementSection statementId={tx.cc_statement_id} />}
         <div className="mfooter">
           <button className="btn-ghost" onClick={onClose}>Cancelar</button>
           <button className="btn-gold" onClick={save}>Guardar cambios</button>
@@ -489,7 +491,10 @@ const TransactionRowDesktop = memo(function TransactionRowDesktop({ tx, selected
     <tr onClick={() => onEdit(tx)} style={{ cursor: 'pointer' }} className={isSalary ? 'tr-salary' : undefined}>
       <td className="td-date">{formatDate(tx.date)}</td>
       <td className="col-key" style={{ maxWidth: 130 }}>
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tx.description}>{tx.description}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }} title={tx.description}>{tx.description}</div>
+          {tx.cc_statement_id && <span title="Ver detalle TC" style={{ fontSize: 11, flexShrink: 0 }}>📄</span>}
+        </div>
         {tx.key_user && (
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tx.key_user}>{tx.key_user}</div>
         )}
@@ -552,6 +557,7 @@ const TransactionCardMobile = memo(function TransactionCardMobile({ tx, selected
       </div>
       <div className="tx-card-desc" style={{ color: 'var(--accent)', fontFamily: 'var(--mono)', fontSize: 11 }}>
         {tx.description}
+        {tx.cc_statement_id && <span title="Ver detalle TC" style={{ fontSize: 11, marginLeft: 5 }}>📄</span>}
         {tx.key_user && <span style={{ color: 'var(--text-dim)', marginLeft: 6 }}>{tx.key_user}</span>}
       </div>
       {tx.notes && (

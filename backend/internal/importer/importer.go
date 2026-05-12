@@ -68,7 +68,7 @@ type AutoTagger interface {
 // empty string disables cleaning.
 // Records are iterated in reverse so that JSON-newest-first ordering yields
 // oldest records getting the lowest DB IDs.
-func Run(ctx context.Context, db *sql.DB, records []MovimientoRecord, fromDate time.Time, accountID *int64, userID *int64, autoTagger AutoTagger, bankID string, logger *slog.Logger) (Result, error) {
+func Run(ctx context.Context, db *sql.DB, records []MovimientoRecord, fromDate time.Time, accountID *int64, userID *int64, autoTagger AutoTagger, bankID domain.BankID, logger *slog.Logger) (Result, error) {
 	txRepo := repository.NewTransactionRepository(db)
 	ccRepo := repository.NewCreditCardRepository(db)
 
@@ -133,7 +133,7 @@ func Run(ctx context.Context, db *sql.DB, records []MovimientoRecord, fromDate t
 	return result, nil
 }
 
-func mapBankRecord(r MovimientoRecord, accountID *int64, userID *int64, bankID string) (domain.CreateTransactionParams, error) {
+func mapBankRecord(r MovimientoRecord, accountID *int64, userID *int64, bankID domain.BankID) (domain.CreateTransactionParams, error) {
 	date, err := ParseDate(r.Date)
 	if err != nil {
 		return domain.CreateTransactionParams{}, fmt.Errorf("parse date: %w", err)
@@ -166,7 +166,7 @@ func mapBankRecord(r MovimientoRecord, accountID *int64, userID *int64, bankID s
 	}, nil
 }
 
-func importCCStatement(ctx context.Context, ccRepo domain.CreditCardRepository, accountID string, records []MovimientoRecord, bankID string, logger *slog.Logger) (domain.CreditCardStatement, int, int, error) {
+func importCCStatement(ctx context.Context, ccRepo domain.CreditCardRepository, accountID string, records []MovimientoRecord, bankID domain.BankID, logger *slog.Logger) (domain.CreditCardStatement, int, int, error) {
 	currency := "CLP"
 	if len(records) > 0 && records[0].Currency == "USD" {
 		currency = "USD"
@@ -211,7 +211,7 @@ func importCCStatement(ctx context.Context, ccRepo domain.CreditCardRepository, 
 	return stmt, imported, dupes, nil
 }
 
-func mapCCItem(r MovimientoRecord, statementID int64, currency string, bankID string) (domain.CreateCCItemParams, error) {
+func mapCCItem(r MovimientoRecord, statementID int64, currency string, bankID domain.BankID) (domain.CreateCCItemParams, error) {
 	date, err := ParseDate(r.Date)
 	if err != nil {
 		return domain.CreateCCItemParams{}, fmt.Errorf("parse date: %w", err)
@@ -254,9 +254,12 @@ func LinkBankPayment(ctx context.Context, db *sql.DB, stmt domain.CreditCardStat
 		UPDATE transactions
 		SET cc_statement_id = $1
 		WHERE cc_statement_id IS NULL
-		  AND source = 'bank_json'
 		  AND amount = $2
-		  AND description ILIKE '%Cargo Por Pago Tc%'
+		  AND (
+		    description ILIKE '%Cargo Por Pago Tc%'
+		    OR description ILIKE '%Pago Tarjeta De Credito%'
+		    OR (description ILIKE '%Tarjeta de credito%' AND description NOT ILIKE '%internacional%')
+		  )
 	`, stmt.ID, stmt.TotalAmount)
 	if err != nil {
 		return err
@@ -268,6 +271,20 @@ func LinkBankPayment(ctx context.Context, db *sql.DB, stmt domain.CreditCardStat
 	return nil
 }
 
+// ccPaymentDescCLP returns true for any description that represents a CLP CC payment.
+// Banco de Chile uses several variants depending on channel/format.
+var ccPaymentDescCLP = `(
+	  t.description ILIKE '%Cargo Por Pago Tc%'
+	  OR t.description ILIKE '%Pago Tarjeta De Credito%'
+	  OR (t.description ILIKE '%Tarjeta de credito%' AND t.description NOT ILIKE '%internacional%')
+	)`
+
+// ccPaymentDescUSD returns true for any description that represents a USD CC payment.
+var ccPaymentDescUSD = `(
+	  t.description ILIKE '%Cargo Por Pago Tc%'
+	  OR t.description ILIKE '%Tarjeta de credito internacional%'
+	)`
+
 // LinkAllStatements bulk-links all unlinked bank transactions against every
 // existing CC statement. Safe to call repeatedly (WHERE cc_statement_id IS NULL).
 func LinkAllStatements(ctx context.Context, db *sql.DB) error {
@@ -277,11 +294,9 @@ func LinkAllStatements(ctx context.Context, db *sql.DB) error {
 		SET cc_statement_id = cs.id
 		FROM credit_card_statements cs
 		WHERE t.cc_statement_id IS NULL
-		  AND t.source = 'bank_json'
 		  AND cs.currency = 'CLP'
 		  AND t.amount = cs.total_amount
-		  AND t.description ILIKE '%Cargo Por Pago Tc%'
-	`)
+		  AND `+ccPaymentDescCLP)
 	if err != nil {
 		return fmt.Errorf("link national: %w", err)
 	}
@@ -291,12 +306,10 @@ func LinkAllStatements(ctx context.Context, db *sql.DB) error {
 		SET cc_statement_id = cs.id
 		FROM credit_card_statements cs
 		WHERE t.cc_statement_id IS NULL
-		  AND t.source = 'bank_json'
 		  AND cs.currency = 'USD'
 		  AND cs.due_date IS NOT NULL
 		  AND t.date BETWEEN cs.due_date - INTERVAL '7 days' AND cs.due_date + INTERVAL '3 days'
-		  AND t.description ILIKE '%Cargo Por Pago Tc%'
-	`)
+		  AND `+ccPaymentDescUSD)
 	return err
 }
 
@@ -309,13 +322,11 @@ func LinkInternationalPayment(ctx context.Context, db *sql.DB, stmt domain.Credi
 	from := stmt.DueDate.AddDate(0, 0, -7)
 	to := stmt.DueDate.AddDate(0, 0, 3)
 	res, err := db.ExecContext(ctx, `
-		UPDATE transactions
+		UPDATE transactions t
 		SET cc_statement_id = $1
-		WHERE cc_statement_id IS NULL
-		  AND source = 'bank_json'
-		  AND date BETWEEN $2 AND $3
-		  AND description ILIKE '%Cargo Por Pago Tc%'
-	`, stmt.ID, from, to)
+		WHERE t.cc_statement_id IS NULL
+		  AND t.date BETWEEN $2 AND $3
+		  AND `+ccPaymentDescUSD, stmt.ID, from, to)
 	if err != nil {
 		return err
 	}
@@ -463,7 +474,7 @@ var bdcPrefixes = []string{
 
 // cleanDescription strips bank-specific noise prefixes from raw fintself descriptions.
 // The original description must be used for RawID computation before calling this.
-func cleanDescription(bankID, desc string) string {
+func cleanDescription(bankID domain.BankID, desc string) string {
 	switch bankID {
 	case domain.BankBancoDeChile:
 		lower := strings.ToLower(desc)

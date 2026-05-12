@@ -18,6 +18,7 @@ type Controllers struct {
 	Sync         *controller.SyncController
 	Import       *controller.ImportController
 	Inference    *controller.InferenceController
+	CreditCard   *controller.CreditCardController
 }
 
 func registerRoutes(r *gin.Engine, ctrl Controllers, jwtSecret string) {
@@ -75,4 +76,10 @@ func registerRoutes(r *gin.Engine, ctrl Controllers, jwtSecret string) {
 	// ── Tag Inference ──────────────────────────────────────────────────────────
 	api.POST("/tags/infer", ctrl.Inference.Infer)
 	api.PUT("/users/settings", ctrl.Inference.UpdateSettings)
+
+	// ── Credit Card ────────────────────────────────────────────────────────────
+	api.GET("/credit-card/statements", ctrl.CreditCard.ListStatements)
+	api.GET("/credit-card/statements/:id", ctrl.CreditCard.GetStatement)
+	api.POST("/credit-card/link-payments", ctrl.CreditCard.LinkPayments)
+	api.POST("/credit-card/import-pdf", ctrl.CreditCard.ImportPDF)
 }

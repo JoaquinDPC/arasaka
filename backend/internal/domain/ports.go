@@ -70,8 +70,8 @@ type CreditCardRepository interface {
 	UpsertStatement(ctx context.Context, p CreateCCStatementParams) (CreditCardStatement, error)
 	CreateItemsBatch(ctx context.Context, items []CreateCCItemParams) (imported, duplicates int, err error)
 	UpdateStatementTotal(ctx context.Context, id int64, total int64) error
-	ListStatements(ctx context.Context) ([]CreditCardStatement, error)
-	GetStatementByID(ctx context.Context, id int64) (CreditCardStatement, error)
+	ListStatements(ctx context.Context, userID int64) ([]CreditCardStatement, error)
+	GetStatementByID(ctx context.Context, id int64, userID int64) (CreditCardStatement, error)
 }
 
 // AppTagRuleRepository is the port for global description-to-tag inference rules.

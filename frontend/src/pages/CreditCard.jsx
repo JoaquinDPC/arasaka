@@ -8,23 +8,20 @@ const INTL_ID     = 'credit_card_internacional_facturados'
 // ── Formatting ────────────────────────────────────────────────────────────
 
 function fmtCLP(n) {
-  return `$\u00a0${Math.abs(n).toLocaleString('es-CL')}`
+  return `$ ${Math.abs(n).toLocaleString('es-CL')}`
 }
 function fmtUSD(cents) {
-  return `US$\u00a0${(Math.abs(cents) / 100).toFixed(2)}`
+  return `US$ ${(Math.abs(cents) / 100).toFixed(2)}`
 }
 function fmt(amount, currency) {
   return currency === 'USD' ? fmtUSD(amount) : fmtCLP(amount)
 }
-
-// Always one line: dd/mm/yyyy
 function fmtDate(iso) {
   if (!iso) return '—'
   const [y, m, d] = iso.slice(0, 10).split('-')
   return `${d}/${m}/${y}`
 }
 
-// "2026-03-24" → "Marzo 2026"
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
                    'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 function periodLabel(isoDate) {
@@ -32,49 +29,131 @@ function periodLabel(isoDate) {
   return `${MONTHS_ES[parseInt(m, 10) - 1]} ${y}`
 }
 
+// ── Period navigator ──────────────────────────────────────────────────────
+
+function PeriodNav({ periods, selected, onChange }) {
+  const idx = periods.indexOf(selected)
+  const canPrev = idx < periods.length - 1
+  const canNext = idx > 0
+
+  const navBtn = {
+    width: 32, height: 32, borderRadius: 6,
+    border: '1px solid var(--border)', background: 'none',
+    color: 'var(--text-muted)', fontSize: 16, cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    transition: 'var(--t)', flexShrink: 0,
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <button
+        style={{ ...navBtn, opacity: canPrev ? 1 : 0.2, cursor: canPrev ? 'pointer' : 'default' }}
+        onClick={() => canPrev && onChange(periods[idx + 1])}
+      >‹</button>
+      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', minWidth: 120, textAlign: 'center' }}>
+        {selected ? periodLabel(selected + '-01') : '—'}
+      </span>
+      <button
+        style={{ ...navBtn, opacity: canNext ? 1 : 0.2, cursor: canNext ? 'pointer' : 'default' }}
+        onClick={() => canNext && onChange(periods[idx - 1])}
+      >›</button>
+    </div>
+  )
+}
+
+// ── Summary bar ───────────────────────────────────────────────────────────
+
+function SummaryBar({ stmts }) {
+  const nacional = stmts.find(s => s.external_account_id === NATIONAL_ID)
+  const intl     = stmts.find(s => s.external_account_id === INTL_ID)
+
+  const hasBoth = nacional && intl
+
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: hasBoth ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)',
+      gap: 14,
+    }}>
+      {nacional && (
+        <div className="card" style={{ padding: '16px 20px' }}>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>Nacional</div>
+          <div style={{ fontSize: 22, fontFamily: 'var(--mono)', fontWeight: 700, color: 'var(--accent)', lineHeight: 1 }}>
+            {fmtCLP(nacional.total_amount)}
+          </div>
+          {nacional.due_date && (
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--mono)', marginTop: 5 }}>
+              Vence {fmtDate(nacional.due_date)}
+            </div>
+          )}
+        </div>
+      )}
+      {intl && (
+        <div className="card" style={{ padding: '16px 20px' }}>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>Internacional</div>
+          <div style={{ fontSize: 22, fontFamily: 'var(--mono)', fontWeight: 700, color: '#9b7fd4', lineHeight: 1 }}>
+            {fmtUSD(intl.total_amount)}
+          </div>
+          {intl.due_date && (
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--mono)', marginTop: 5 }}>
+              Vence {fmtDate(intl.due_date)}
+            </div>
+          )}
+        </div>
+      )}
+      {hasBoth && (
+        <div className="card" style={{ padding: '16px 20px', borderColor: 'rgba(201,168,76,.25)' }}>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>Total CLP estimado</div>
+          <div style={{ fontSize: 18, fontFamily: 'var(--mono)', fontWeight: 600, color: 'var(--text)', lineHeight: 1 }}>
+            {fmtCLP(nacional.total_amount + intl.total_amount)}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 5 }}>
+            incl. USD (sin conversión)
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Installment row ───────────────────────────────────────────────────────
 
 function InstallmentRow({ it, currency }) {
   const current    = it.installment_current ?? 1
   const total      = it.installment_total   ?? 1
-  const remaining  = total - current
-  const remAmount  = remaining * it.amount
-  const origAmount = total * it.amount
+  const origAmount = it.amount                        // total purchase price from PDF
+  const monthlyAmt = Math.round(origAmount / total)  // cuota mensual
+  const paidAmount = monthlyAmt * current
   const pct        = Math.round((current / total) * 100)
 
   return (
-    <div className="rounded-xl bg-white/5 p-4 space-y-3">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-medium text-white">{it.description}</p>
-          <p className="text-xs text-white/40 mt-0.5 whitespace-nowrap">{fmtDate(it.date)}</p>
+    <div style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {it.description}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--mono)', marginTop: 3 }}>
+            {fmtDate(it.date)} · Compra {fmt(origAmount, currency)}
+          </div>
         </div>
-        <div className="text-right shrink-0">
-          <p className="text-sm font-semibold text-amber-300 whitespace-nowrap">
-            {fmt(it.amount, currency)}<span className="text-white/30 font-normal">/mes</span>
-          </p>
-          <p className="text-xs text-white/40 mt-0.5 whitespace-nowrap">
-            Compra: {fmt(origAmount, currency)}
-          </p>
-        </div>
-      </div>
-
-      <div>
-        <div className="flex justify-between text-xs text-white/40 mb-1">
-          <span>Cuota {current} de {total}</span>
-          <span>{pct}% pagado</span>
-        </div>
-        <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-          <div className="h-full rounded-full bg-amber-400/70" style={{ width: `${pct}%` }} />
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{ fontSize: 13, fontFamily: 'var(--mono)', fontWeight: 600, color: 'var(--accent)' }}>
+            {fmt(monthlyAmt, currency)}<span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>/mes</span>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--mono)', marginTop: 2 }}>
+            {fmt(paidAmount, currency)} de {fmt(origAmount, currency)}
+          </div>
         </div>
       </div>
-
-      {remaining > 0 && (
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-white/40">Quedan {remaining} cuota{remaining !== 1 ? 's' : ''}</span>
-          <span className="text-white/70 font-medium whitespace-nowrap">{fmt(remAmount, currency)} restantes</span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+        <div style={{ flex: 1, height: 3, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: `${pct}%`, background: 'var(--accent)', borderRadius: 2, transition: 'width .4s ease' }} />
         </div>
-      )}
+        <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--text-dim)', flexShrink: 0 }}>
+          {current}/{total}
+        </span>
+      </div>
     </div>
   )
 }
@@ -82,103 +161,110 @@ function InstallmentRow({ it, currency }) {
 // ── Statement card ────────────────────────────────────────────────────────
 
 function StatementCard({ stmt }) {
-  const isIntl = stmt.account_id === INTL_ID
-  const label  = isIntl ? 'Tarjeta Internacional' : 'Tarjeta Nacional'
-  const accent = isIntl ? 'text-purple-300' : 'text-cyan-300'
+  const isIntl  = stmt.external_account_id === INTL_ID
+  const label   = isIntl ? 'Tarjeta Internacional' : 'Tarjeta Nacional'
+  const accent  = isIntl ? '#9b7fd4' : 'var(--accent)'
 
   const items        = stmt.items ?? []
   const installments = items.filter(it => it.item_type === 'installment')
   const purchases    = items.filter(it => it.item_type === 'purchase')
   const commissions  = items.filter(it => it.item_type === 'commission')
 
-  const totalInstRem   = installments.reduce((s, it) => {
-    return s + ((it.installment_total ?? 1) - (it.installment_current ?? 1)) * it.amount
+  const totalInstPaid = installments.reduce((s, it) => {
+    const tot = it.installment_total ?? 1
+    return s + Math.round(it.amount / tot) * (it.installment_current ?? 1)
   }, 0)
+  const totalInstOrig = installments.reduce((s, it) => s + it.amount, 0)
   const totalPurchases   = purchases.reduce((s, it) => s + it.amount, 0)
   const totalCommissions = commissions.reduce((s, it) => s + it.amount, 0)
 
+  const sectionLabel = {
+    fontSize: 10, fontWeight: 700, letterSpacing: '0.07em',
+    textTransform: 'uppercase', color: 'var(--text-muted)',
+  }
+
   return (
-    <div className="glass rounded-2xl p-6 space-y-6">
+    <div className="card" style={{ borderColor: isIntl ? 'rgba(155,127,212,.25)' : 'rgba(201,168,76,.18)' }}>
 
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className={`text-xs font-semibold uppercase tracking-widest mb-1 ${accent}`}>{label}</p>
-          <p className="text-3xl font-bold text-white">{fmt(stmt.total_amount, stmt.currency)}</p>
-          <p className="text-xs text-white/40 mt-1 whitespace-nowrap">
-            Período {fmtDate(stmt.period_from)} – {fmtDate(stmt.period_to)}
-          </p>
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: accent, marginBottom: 8 }}>
+          {label}
         </div>
-        <div className="text-right shrink-0 space-y-2">
-          {stmt.due_date && (
-            <div>
-              <p className="text-xs text-white/40">Vence</p>
-              <p className="text-sm font-semibold text-amber-300 whitespace-nowrap">{fmtDate(stmt.due_date)}</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 28, fontFamily: 'var(--mono)', fontWeight: 700, color: 'var(--text)', lineHeight: 1 }}>
+              {fmt(stmt.total_amount, stmt.currency)}
             </div>
-          )}
-          {stmt.min_payment > 0 && (
-            <div>
-              <p className="text-xs text-white/40">Pago mínimo</p>
-              <p className="text-sm font-medium text-white/60 whitespace-nowrap">{fmt(stmt.min_payment, stmt.currency)}</p>
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--mono)', marginTop: 6 }}>
+              {fmtDate(stmt.period_from)} – {fmtDate(stmt.period_to)}
             </div>
-          )}
+          </div>
+          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+            {stmt.due_date && (
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 10, color: 'var(--text-dim)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 2 }}>Vence</div>
+                <div style={{ fontSize: 13, fontFamily: 'var(--mono)', fontWeight: 600, color: accent }}>{fmtDate(stmt.due_date)}</div>
+              </div>
+            )}
+            {stmt.min_payment > 0 && (
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--text-dim)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 2 }}>Pago mínimo</div>
+                <div style={{ fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--text-muted)' }}>{fmt(stmt.min_payment, stmt.currency)}</div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Installments */}
       {installments.length > 0 && (
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-widest text-amber-400/80">Cuotas</h3>
-            {totalInstRem > 0 && (
-              <span className="text-xs text-white/40 whitespace-nowrap">
-                Remanente: <span className="text-white/70 font-medium">{fmt(totalInstRem, stmt.currency)}</span>
-              </span>
-            )}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <span style={{ ...sectionLabel, color: 'var(--accent)' }}>Cuotas ({installments.length})</span>
+            <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text-muted)' }}>
+              {fmt(totalInstPaid, stmt.currency)} de {fmt(totalInstOrig, stmt.currency)}
+            </span>
           </div>
           {installments.map(it => (
             <InstallmentRow key={it.id} it={it} currency={stmt.currency} />
           ))}
-        </section>
+        </div>
       )}
 
       {/* Purchases */}
       {purchases.length > 0 && (
-        <section className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-widest text-blue-400/80">Compras</h3>
-            <span className="text-xs text-white/50 font-medium whitespace-nowrap">{fmt(totalPurchases, stmt.currency)}</span>
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <span style={sectionLabel}>Compras ({purchases.length})</span>
+            <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text-muted)' }}>{fmt(totalPurchases, stmt.currency)}</span>
           </div>
-          <div className="divide-y divide-white/5">
-            {purchases.map(it => (
-              <div key={it.id} className="flex items-center justify-between gap-3 py-1.5">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="text-white/30 text-xs whitespace-nowrap shrink-0">{fmtDate(it.date)}</span>
-                  <span className="text-white/80 text-sm truncate">{it.description}</span>
-                </div>
-                <span className="text-white text-sm font-medium shrink-0 whitespace-nowrap">{fmt(it.amount, it.currency)}</span>
+          {purchases.map(it => (
+            <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>
+                <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text-dim)', flexShrink: 0 }}>{fmtDate(it.date)}</span>
+                <span style={{ fontSize: 13, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.description}</span>
               </div>
-            ))}
-          </div>
-        </section>
+              <span style={{ fontSize: 13, fontFamily: 'var(--mono)', fontWeight: 600, color: 'var(--text)', flexShrink: 0 }}>{fmt(it.amount, it.currency)}</span>
+            </div>
+          ))}
+        </div>
       )}
 
       {/* Commissions */}
       {commissions.length > 0 && (
-        <section className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-widest text-red-400/80">Cargos adicionales</h3>
-            <span className="text-xs text-white/50 font-medium whitespace-nowrap">{fmt(totalCommissions, stmt.currency)}</span>
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <span style={{ ...sectionLabel, color: 'var(--red)' }}>Cargos adicionales</span>
+            <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--red)' }}>{fmt(totalCommissions, stmt.currency)}</span>
           </div>
-          <div className="divide-y divide-white/5">
-            {commissions.map(it => (
-              <div key={it.id} className="flex items-center justify-between gap-3 py-1.5">
-                <span className="text-white/60 text-sm truncate">{it.description}</span>
-                <span className="text-red-300 text-sm font-medium shrink-0 whitespace-nowrap">{fmt(it.amount, it.currency)}</span>
-              </div>
-            ))}
-          </div>
-        </section>
+          {commissions.map(it => (
+            <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.description}</span>
+              <span style={{ fontSize: 13, fontFamily: 'var(--mono)', fontWeight: 600, color: 'var(--red)', flexShrink: 0 }}>{fmt(it.amount, it.currency)}</span>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   )
@@ -187,6 +273,7 @@ function StatementCard({ stmt }) {
 // ── Import panel ──────────────────────────────────────────────────────────
 
 function ImportPanel({ onImported }) {
+  const [open, setOpen]         = useState(false)
   const [file, setFile]         = useState(null)
   const [password, setPassword] = useState('')
   const [loading, setLoading]   = useState(false)
@@ -231,46 +318,67 @@ function ImportPanel({ onImported }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="glass rounded-2xl p-5 flex flex-wrap items-end gap-3">
-      <div className="flex flex-col gap-1">
-        <label className="text-xs text-white/40 font-medium">Estado de cuenta PDF</label>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".pdf"
-          onChange={e => setFile(e.target.files[0])}
-          className="text-sm text-white/70 file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:bg-white/10 file:text-white/70 file:text-sm file:cursor-pointer hover:file:bg-white/15"
-        />
-      </div>
-      <div className="flex flex-col gap-1">
-        <label className="text-xs text-white/40 font-medium">Clave PDF</label>
-        <input
-          type="password"
-          value={password}
-          onChange={e => setPassword(e.target.value)}
-          placeholder="••••"
-          className="w-28 px-3 py-1.5 rounded-lg bg-white/10 text-white text-sm placeholder-white/25 focus:outline-none focus:ring-1 focus:ring-white/20"
-        />
-      </div>
+    <div>
       <button
-        type="submit"
-        disabled={!file || loading}
-        className="px-4 py-1.5 rounded-xl bg-white/10 text-white text-sm font-medium hover:bg-white/15 disabled:opacity-40 transition-colors cursor-pointer"
+        onClick={() => setOpen(v => !v)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          background: 'none', border: '1px solid var(--border)',
+          borderRadius: 7, padding: '6px 14px', cursor: 'pointer',
+          fontSize: 12, fontWeight: 600, color: 'var(--text-muted)',
+          letterSpacing: '0.03em', transition: 'var(--t)',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.color = 'var(--text)'; e.currentTarget.style.borderColor = 'rgba(201,168,76,.4)' }}
+        onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.borderColor = 'var(--border)' }}
       >
-        {loading ? 'Importando…' : 'Importar PDF'}
+        <span style={{ fontSize: 13 }}>{open ? '▾' : '▸'}</span>
+        Importar PDF
       </button>
-      <button
-        type="button"
-        onClick={handleLink}
-        disabled={linking}
-        className="px-4 py-1.5 rounded-xl bg-white/10 text-white/60 text-sm font-medium hover:bg-white/15 hover:text-white disabled:opacity-40 transition-colors cursor-pointer"
-      >
-        {linking ? 'Vinculando…' : 'Vincular pagos'}
-      </button>
-      {msg && (
-        <p className={`text-sm ${msg.ok ? 'text-green-400' : 'text-red-400'}`}>{msg.text}</p>
+
+      {open && (
+        <form onSubmit={handleSubmit} className="fade card" style={{ marginTop: 10, padding: 16, display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Estado de cuenta PDF</label>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".pdf"
+              onChange={e => setFile(e.target.files[0])}
+              style={{ fontSize: 12, color: 'var(--text-muted)' }}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Clave PDF</label>
+            <input
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="••••"
+              style={{ width: 100, padding: '7px 10px', borderRadius: 7, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: 13 }}
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={!file || loading}
+            className="btn-gold"
+            style={{ opacity: (!file || loading) ? 0.4 : 1 }}
+          >
+            {loading ? 'Importando…' : 'Importar'}
+          </button>
+          <button
+            type="button"
+            onClick={handleLink}
+            disabled={linking}
+            className="btn-ghost"
+          >
+            {linking ? 'Vinculando…' : 'Vincular pagos'}
+          </button>
+          {msg && (
+            <span style={{ fontSize: 12, color: msg.ok ? 'var(--green)' : 'var(--red)' }}>{msg.text}</span>
+          )}
+        </form>
       )}
-    </form>
+    </div>
   )
 }
 
@@ -283,6 +391,7 @@ export default function CreditCard() {
   const [periods, setPeriods]         = useState([])
   const [selectedPeriod, setSelected] = useState(null)
   const [stmtsWithItems, setWithItems] = useState([])
+  const [summaryStmts, setSummaryStmts] = useState([])
   const [loading, setLoading]         = useState(true)
   const [error, setError]             = useState(null)
 
@@ -302,7 +411,6 @@ export default function CreditCard() {
       ps.sort((a, b) => b.localeCompare(a))
       setPeriods(ps)
 
-      // Honour ?period=YYYY-MM from navigation; fall back to most recent
       const requested = searchParams.get('period')
       const initial = (requested && ps.includes(requested)) ? requested : (ps[0] ?? null)
       setSelected(initial)
@@ -315,15 +423,15 @@ export default function CreditCard() {
 
   useEffect(() => { loadAll() }, [])
 
-  // Whenever selected period changes, fetch the two statements with items
   useEffect(() => {
     if (!selectedPeriod || allStmts.length === 0) return
 
     const matches = allStmts.filter(s => s.period_to.slice(0, 7) === selectedPeriod)
     const targets = [NATIONAL_ID, INTL_ID]
-      .map(id => matches.find(s => s.account_id === id))
+      .map(id => matches.find(s => s.external_account_id === id))
       .filter(Boolean)
 
+    setSummaryStmts(targets)
     setWithItems([])
     Promise.all(targets.map(s => api.ccStatement(s.id)))
       .then(setWithItems)
@@ -331,43 +439,41 @@ export default function CreditCard() {
   }, [selectedPeriod, allStmts])
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 space-y-6">
-      <h1 className="text-xl font-semibold text-white">Tarjeta de Crédito</h1>
+    <div style={{ maxWidth: 860, margin: '0 auto', padding: '40px 48px' }}>
 
-      <ImportPanel onImported={loadAll} />
+      {/* Page header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--text)', margin: 0 }}>Tarjeta de Crédito</h1>
+          {periods.length > 1 && selectedPeriod && (
+            <PeriodNav periods={periods} selected={selectedPeriod} onChange={setSelected} />
+          )}
+          {periods.length === 1 && selectedPeriod && (
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{periodLabel(selectedPeriod + '-01')}</span>
+          )}
+        </div>
+        <ImportPanel onImported={loadAll} />
+      </div>
 
-      {loading && <p className="text-white/40 text-sm">Cargando…</p>}
-      {error   && <p className="text-red-400 text-sm">{error}</p>}
+      {loading && <p style={{ fontSize: 13, color: 'var(--text-dim)' }}>Cargando…</p>}
+      {error   && <p style={{ fontSize: 13, color: 'var(--red)' }}>{error}</p>}
 
-      {/* Period tabs */}
-      {periods.length > 1 && (
-        <div className="flex gap-2 flex-wrap">
-          {periods.map(p => (
-            <button
-              key={p}
-              onClick={() => setSelected(p)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap cursor-pointer ${
-                p === selectedPeriod
-                  ? 'bg-white/15 text-white'
-                  : 'text-white/40 hover:text-white/70 hover:bg-white/8'
-              }`}
-            >
-              {periodLabel(p + '-01')}
-            </button>
-          ))}
+      {!loading && periods.length === 0 && (
+        <div className="empty">
+          <h3>Sin estados de cuenta</h3>
+          <p>Importa un PDF para comenzar.</p>
         </div>
       )}
 
-      {/* Period heading when single period */}
-      {periods.length === 1 && selectedPeriod && (
-        <p className="text-sm text-white/40">{periodLabel(selectedPeriod + '-01')}</p>
+      {/* Summary bar */}
+      {summaryStmts.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <SummaryBar stmts={summaryStmts} />
+        </div>
       )}
 
-      {!loading && periods.length === 0 && (
-        <p className="text-white/40 text-sm">No hay estados de cuenta. Importa un PDF para comenzar.</p>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+      {/* Statement cards */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         {stmtsWithItems.map(stmt => (
           <StatementCard key={stmt.id} stmt={stmt} />
         ))}

@@ -12,6 +12,7 @@ import Accounts from './pages/Accounts'
 import Budgets from './pages/Budgets'
 import Debts from './pages/Debts'
 import Import from './pages/Import'
+import CreditCard from './pages/CreditCard'
 
 function getUser() {
   try { return JSON.parse(localStorage.getItem('arasaka_user')) } catch { return null }
@@ -55,6 +56,7 @@ export default function App() {
           <Route path="deudas"       element={<Debts />}      />
           <Route path="presupuestos" element={<Budgets />}    />
           <Route path="importar"     element={<Import />}     />
+          <Route path="tarjeta"      element={<CreditCard />} />
           </Route>
         </Routes>
       </AccountProvider>

@@ -57,7 +57,7 @@ type User struct {
 type Account struct {
 	ID            int64      `json:"id"             db:"id"`
 	UserID        int64      `json:"user_id"        db:"user_id"`
-	BankID        string     `json:"bank_id"        db:"bank_id"`
+	BankID        BankID     `json:"bank_id"        db:"bank_id"`
 	Name          string     `json:"name"           db:"name"`
 	Type          string     `json:"type"           db:"type"`
 	Currency      string     `json:"currency"       db:"currency"`

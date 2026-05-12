@@ -19,7 +19,7 @@ import (
 
 func main() {
 	configPath := flag.String("config", "", "path to config.yml (required)")
-	bankFlag := flag.String("bank", domain.BankBancoDeChile, "bank ID for description cleaning (e.g. banco_de_chile, santander)")
+	bankFlag := flag.String("bank", string(domain.BankBancoDeChile), "bank ID for description cleaning (e.g. banco_de_chile, santander)")
 	flag.Parse()
 
 	if *configPath == "" {
@@ -74,7 +74,7 @@ func main() {
 	fmt.Printf("Loaded %d records from %s\n", len(records), jsonPath)
 
 	ctx := context.Background()
-	result, err := importer.Run(ctx, db, records, time.Time{}, nil, nil, nil, *bankFlag, log)
+	result, err := importer.Run(ctx, db, records, time.Time{}, nil, nil, nil, domain.BankID(*bankFlag), log)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "import: %v\n", err)
 		os.Exit(1)

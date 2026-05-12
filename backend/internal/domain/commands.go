@@ -8,14 +8,14 @@ import "time"
 
 type CreateAccountParams struct {
 	UserID   int64
-	BankID   string
+	BankID   BankID
 	Name     string
 	Type     string
 	Currency string
 }
 
 type UpdateAccountParams struct {
-	BankID *string
+	BankID *BankID
 	Name   *string
 	Type   *string
 }

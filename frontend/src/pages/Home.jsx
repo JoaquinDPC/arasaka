@@ -6,6 +6,7 @@ import Spinner from '../components/Spinner'
 import CatIcon from '../components/CatIcon'
 import { useAccount } from '../context/AccountContext'
 import { InfoTooltip, InsightExplain } from '../components/InfoTooltip'
+import CCStatementSection from '../components/CCStatementSection'
 
 function fmtDate(ds) {
   const d = new Date(ds + 'T12:00')
@@ -93,6 +94,7 @@ function MovDetail({ tx, onClose }) {
             {tx.notes}
           </div>
         )}
+        {tx.cc_statement_id && <CCStatementSection statementId={tx.cc_statement_id} />}
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
           <button className="btn-ghost" onClick={onClose}>Cerrar</button>
         </div>
