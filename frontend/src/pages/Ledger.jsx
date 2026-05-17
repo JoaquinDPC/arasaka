@@ -207,7 +207,7 @@ function AddModal({ onClose, onSaved, currentSaldo, accountId, recognizedTags, u
   const now = new Date()
   const [f, setF] = useState({
     date: now.toISOString().slice(0, 10),
-    keyUser: '',
+    customDescription: '',
     description: '',
     tags: [],
     flow: 'EXPENSE',
@@ -225,17 +225,13 @@ function AddModal({ onClose, onSaved, currentSaldo, accountId, recognizedTags, u
   useEffect(() => {
     const desc = f.description.trim()
     if (!desc) { setInferenceSuggestions([]); return }
-    try {
-      const user = JSON.parse(localStorage.getItem('arasaka_user'))
-      if (user?.settings?.inference_enabled === false) return
-    } catch {}
     if (selectedAccount?.settings?.inference_enabled === false) return
     if (inferCache.has(desc)) {
       setInferenceSuggestions(inferCache.get(desc))
       return
     }
     const t = setTimeout(() => {
-      api.inferTags(desc)
+      api.inferTags(desc, accountId)
         .then(r => {
           const suggs = r.suggestions ?? []
           inferCache.set(desc, suggs)
@@ -261,7 +257,7 @@ function AddModal({ onClose, onSaved, currentSaldo, accountId, recognizedTags, u
         flow:        f.flow,
         amount:      Math.round(Math.abs(parseFloat(f.amount))),
         notes:       f.notes || undefined,
-        key_user:    f.keyUser || undefined,
+        custom_description: f.customDescription || undefined,
         source:      'manual',
         currency:    'CLP',
         account_id:  accountId ?? undefined,
@@ -300,8 +296,8 @@ function AddModal({ onClose, onSaved, currentSaldo, accountId, recognizedTags, u
           </div>
           <div className="ff full">
             <div className="flbl">Subkey <span style={{ color: 'var(--text-dim)', fontWeight: 400, fontSize: 9 }}>tu alias</span></div>
-            <input className="finput" placeholder="Tu código / alias" value={f.keyUser}
-              onChange={e => set('keyUser', e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: 12 }} />
+            <input className="finput" placeholder="Tu código / alias" value={f.customDescription}
+              onChange={e => set('customDescription', e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: 12 }} />
           </div>
           <div className="ff">
             <div className="flbl">Monto CLP</div>
@@ -332,253 +328,28 @@ function AddModal({ onClose, onSaved, currentSaldo, accountId, recognizedTags, u
   )
 }
 
-// ── PurchasesPicker ─────────────────────────────────────────────────────────
-
-function PurchasesPicker({ accountId, paymentId, initialSelected, onSelectionChange }) {
-  const [purchases, setPurchases] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [selected, setSelected] = useState(new Set((initialSelected || []).map(Number)))
-  const [showPaid, setShowPaid] = useState(false)
-
-  useEffect(() => {
-    api.transactions({ account_id: accountId, flow: 'EXPENSE' })
-      .then(data => setPurchases(Array.isArray(data) ? data : []))
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [accountId])
-
-  const visible = purchases.filter(tx => {
-    const linkedTo = tx.meta?.paidByPaymentId
-    if (linkedTo && Number(linkedTo) !== Number(paymentId)) return showPaid
-    return true
-  })
-
-  const linkedTotal = purchases
-    .filter(tx => selected.has(Number(tx.id)))
-    .reduce((s, tx) => s + tx.amount, 0)
-
-  function toggle(id) {
-    const next = new Set(selected)
-    next.has(Number(id)) ? next.delete(Number(id)) : next.add(Number(id))
-    setSelected(next)
-    onSelectionChange([...next])
-  }
-
-  if (loading) return <div style={{ padding: '12px 0', color: 'var(--text-muted)', fontSize: 12 }}>Cargando compras…</div>
-  if (!visible.length && !showPaid) return (
-    <div style={{ padding: '12px 0', color: 'var(--text-muted)', fontSize: 12 }}>
-      Sin compras pendientes.{' '}
-      <span style={{ color: 'var(--accent)', cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setShowPaid(true)}>Ver todas</span>
-    </div>
-  )
-
-  return (
-    <div>
-      {/* header controls */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
-          <input type="checkbox" checked={showPaid} onChange={e => setShowPaid(e.target.checked)}
-            style={{ accentColor: 'var(--accent)' }} />
-          mostrar ya pagadas
-        </label>
-        {selected.size > 0 && (
-          <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--red)', fontWeight: 700 }}>
-            Total: {formatCLP(linkedTotal)}
-          </span>
-        )}
-      </div>
-
-      {/* scrollable list */}
-      <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 7 }}>
-        {visible.map(tx => {
-          const on = selected.has(Number(tx.id))
-          const alreadyLinked = tx.meta?.paidByPaymentId && Number(tx.meta.paidByPaymentId) !== Number(paymentId)
-          const tag = tx.tags?.[0] || 'Otros'
-          const color = getCatColor(tag)
-          return (
-            <div key={tx.id} onClick={() => toggle(tx.id)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px',
-                borderBottom: '1px solid rgba(39,39,41,.5)', cursor: 'pointer',
-                background: on ? 'rgba(201,168,76,.07)' : 'transparent',
-                transition: 'background var(--t)',
-              }}>
-              <input type="checkbox" checked={on} onChange={() => {}} onClick={e => e.stopPropagation()}
-                style={{ accentColor: 'var(--accent)', flexShrink: 0 }} />
-              <CatIcon name={tag} size={11} color={color} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5, overflow: 'hidden' }}>
-                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{formatDate(tx.date)}</span>
-                  <span style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tx.description}</span>
-                  {tx.meta?.installments && (
-                    <span style={{ fontSize: 9, padding: '1px 4px', borderRadius: 3, background: 'rgba(201,168,76,.15)', color: 'var(--accent)', fontFamily: 'var(--mono)', fontWeight: 700, flexShrink: 0 }}>
-                      {tx.meta.installments.current}/{tx.meta.installments.total}
-                    </span>
-                  )}
-                </div>
-              </div>
-              {alreadyLinked && (
-                <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: 'rgba(76,175,125,.12)', color: 'var(--green)', fontWeight: 700, whiteSpace: 'nowrap' }}>pagada</span>
-              )}
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 700, color: 'var(--red)', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                {formatCLP(tx.amount)}
-              </span>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-// ── LinkedPurchasesModal ─────────────────────────────────────────────────────
-
-function LinkedPurchasesModal({ payment, onClose }) {
-  const [purchases, setPurchases] = useState([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    if (!payment.account_id) { setLoading(false); return }
-    const paidIds = new Set((payment.meta?.paidPurchaseIds || []).map(Number))
-    api.transactions({ account_id: payment.account_id, flow: 'EXPENSE' })
-      .then(data => {
-        const all = Array.isArray(data) ? data : []
-        setPurchases(all.filter(tx => paidIds.has(Number(tx.id))))
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [])
-
-  const purchasesTotal = purchases.reduce((s, tx) => s + tx.amount, 0)
-  const diff = payment.amount - purchasesTotal
-
-  // Group by tag
-  const byTag = {}
-  for (const tx of purchases) {
-    const tag = tx.tags?.[0] || 'Otros'
-    byTag[tag] = (byTag[tag] || 0) + tx.amount
-  }
-  const tagEntries = Object.entries(byTag).sort((a, b) => b[1] - a[1])
-
-  return (
-    <div className="overlay fade" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal" style={{ width: 560, maxWidth: '96vw' }}>
-        <div className="modal-hdr">
-          <div>
-            <div className="modal-ttl">Detalle del pago</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, fontFamily: 'var(--mono)' }}>{payment.description} · {formatDate(payment.date)}</div>
-          </div>
-          <button className="modal-close" onClick={onClose}>✕</button>
-        </div>
-
-        {/* 3 stat cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 20 }}>
-          {[
-            { label: 'Pago', value: formatCLP(payment.amount), color: 'var(--green)' },
-            { label: 'Compras ligadas', value: formatCLP(purchasesTotal), color: 'var(--accent)' },
-            { label: 'Diferencia', value: formatCLP(Math.abs(diff)), color: Math.abs(diff) < 500 ? 'var(--green)' : 'var(--red)' },
-          ].map(s => (
-            <div key={s.label} style={{ background: 'var(--surface2)', borderRadius: 8, padding: '12px 14px', border: '1px solid var(--border)' }}>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.07em', fontWeight: 700, marginBottom: 4 }}>{s.label}</div>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 16, fontWeight: 700, color: s.color }}>{s.value}</div>
-            </div>
-          ))}
-        </div>
-
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)', fontSize: 12 }}>Cargando…</div>
-        ) : purchases.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '20px 0', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 13 }}>
-            Edita el movimiento para asociarlas.
-          </div>
-        ) : (
-          <>
-            {/* By tag */}
-            {tagEntries.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.07em', fontWeight: 700, marginBottom: 8 }}>Por categoría</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                  {tagEntries.map(([tag, sum]) => {
-                    const color = getCatColor(tag)
-                    return (
-                      <div key={tag} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0 }} />
-                        <span style={{ fontSize: 12, flex: 1 }}>{tag}</span>
-                        <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color }}>{formatCLP(sum)}</span>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Purchases list */}
-            <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.07em', fontWeight: 700, marginBottom: 8 }}>
-              Compras ({purchases.length})
-            </div>
-            <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
-              {purchases.map(tx => {
-                const tag = tx.tags?.[0] || 'Otros'
-                const color = getCatColor(tag)
-                return (
-                  <div key={tx.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid rgba(39,39,41,.5)' }}>
-                    <CatIcon name={tag} size={11} color={color} />
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{formatDate(tx.date)}</span>
-                    <span style={{ fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tx.description}</span>
-                    {tx.meta?.installments && (
-                      <span style={{ fontSize: 9, padding: '1px 4px', borderRadius: 3, background: 'rgba(201,168,76,.15)', color: 'var(--accent)', fontFamily: 'var(--mono)', fontWeight: 700 }}>
-                        {tx.meta.installments.current}/{tx.meta.installments.total}
-                      </span>
-                    )}
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 700, color: 'var(--red)', flexShrink: 0 }}>
-                      {formatCLP(tx.amount)}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          </>
-        )}
-
-        <div className="mfooter" style={{ marginTop: 16 }}>
-          <button className="btn-ghost" onClick={onClose}>Cerrar</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ── EditModal ────────────────────────────────────────────────────────────────
 
 function EditModal({ tx, onClose, onUpdate, recognizedTags, usedTags, selectedAccount }) {
   const [f, setF] = useState({
-    date:    tx.date?.slice(0, 10) ?? '',
-    keyUser: tx.key_user ?? '',
-    tags:    tx.tags ?? [],
-    notes:   tx.notes ?? '',
+    date:              tx.date?.slice(0, 10) ?? '',
+    customDescription: tx.custom_description ?? '',
+    tags:              tx.tags ?? [],
+    notes:             tx.notes ?? '',
   })
   const set = useCallback((k, v) => setF(p => ({ ...p, [k]: v })), [])
   const onChangeTags = useCallback(v => setF(p => ({ ...p, tags: v })), [])
-  const color = getCatColor(tx.category)
+  const color = getCatColor(tx.tags?.[0])
   const [inferenceSuggestions, setInferenceSuggestions] = useState([])
 
-  // CC payment reconciliation state
-  const isCCPayment = tx.flow === 'INCOME' && selectedAccount?.type === 'Tarjeta de crédito'
-  const [linkedPurchases, setLinkedPurchases] = useState((tx.meta?.paidPurchaseIds || []).map(Number))
-  const [purchasesModified, setPurchasesModified] = useState(false)
-
   useEffect(() => {
-    try {
-      const user = JSON.parse(localStorage.getItem('arasaka_user'))
-      if (user?.settings?.inference_enabled === false) return
-    } catch {}
     if (selectedAccount?.settings?.inference_enabled === false) return
     const desc = tx.description
     if (inferCache.has(desc)) {
       setInferenceSuggestions(inferCache.get(desc))
       return
     }
-    api.inferTags(desc)
+    api.inferTags(desc, tx.account_id)
       .then(r => {
         const suggs = r.suggestions ?? []
         inferCache.set(desc, suggs)
@@ -592,14 +363,11 @@ function EditModal({ tx, onClose, onUpdate, recognizedTags, usedTags, selectedAc
       date:     f.date || undefined,
       tags:     f.tags,
       notes:    f.notes.trim() || null,
-      key_user: f.keyUser.trim() || null,
+      custom_description: f.customDescription.trim() || null,
     }
     onUpdate({ ...tx, ...payload })
     onClose()
     api.updateTransaction(tx.id, payload).catch(() => {})
-    if (purchasesModified) {
-      api.linkPurchases(tx.id, linkedPurchases).catch(() => {})
-    }
   }
 
   return (
@@ -608,7 +376,7 @@ function EditModal({ tx, onClose, onUpdate, recognizedTags, usedTags, selectedAc
         {/* Immutable header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, padding: '12px 14px', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)' }}>
           <div style={{ width: 44, height: 44, borderRadius: 8, background: color + '22', border: `1px solid ${color}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <CatIcon name={tx.category} size={22} />
+            <CatIcon name={tx.tags?.[0]} size={22} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tx.description}</div>
@@ -629,8 +397,8 @@ function EditModal({ tx, onClose, onUpdate, recognizedTags, usedTags, selectedAc
           </div>
           <div className="ff full">
             <div className="flbl">Subkey <span style={{ color: 'var(--text-dim)', fontWeight: 400, fontSize: 9 }}>tu alias</span></div>
-            <input className="finput" placeholder="Tu código / alias" value={f.keyUser}
-              onChange={e => set('keyUser', e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: 12 }} />
+            <input className="finput" placeholder="Tu código / alias" value={f.customDescription}
+              onChange={e => set('customDescription', e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: 12 }} />
           </div>
           <div className="ff full">
             <div className="flbl">Tags / Categorías</div>
@@ -642,21 +410,6 @@ function EditModal({ tx, onClose, onUpdate, recognizedTags, usedTags, selectedAc
               onChange={e => set('notes', e.target.value)} style={{ resize: 'vertical', fontFamily: 'var(--font)' }} />
           </div>
         </div>
-
-        {/* CC payment reconciliation */}
-        {isCCPayment && (
-          <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.07em', fontWeight: 700, marginBottom: 10 }}>
-              Compras facturadas en este pago
-            </div>
-            <PurchasesPicker
-              accountId={tx.account_id}
-              paymentId={tx.id}
-              initialSelected={linkedPurchases}
-              onSelectionChange={ids => { setLinkedPurchases(ids); setPurchasesModified(true) }}
-            />
-          </div>
-        )}
 
         {tx.cc_statement_id && <CCStatementSection statementId={tx.cc_statement_id} />}
         <div className="mfooter">
@@ -730,10 +483,9 @@ const Pagination = memo(function Pagination({
   )
 })
 
-const TransactionRowDesktop = memo(function TransactionRowDesktop({ tx, selectedId, onEdit, onShowLinked }) {
+const TransactionRowDesktop = memo(function TransactionRowDesktop({ tx, selectedId, onEdit }) {
   const tags = tx.tags ?? []
-  const isSalary = tx.tags?.includes('sueldo') || tx.category === 'sueldo'
-  const linkedCount = tx.meta?.paidPurchaseIds?.length || 0
+  const isSalary = tx.tags?.some(t => t.toLowerCase() === 'sueldo')
   return (
     <tr onClick={() => onEdit(tx)} style={{ cursor: 'pointer' }} className={isSalary ? 'tr-salary' : undefined}>
       <td className="td-date">{formatDate(tx.date)}</td>
@@ -742,8 +494,8 @@ const TransactionRowDesktop = memo(function TransactionRowDesktop({ tx, selected
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }} title={tx.description}>{tx.description}</div>
           {tx.cc_statement_id && <span title="Ver detalle TC" style={{ fontSize: 11, flexShrink: 0 }}>📄</span>}
         </div>
-        {tx.key_user && (
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tx.key_user}>{tx.key_user}</div>
+        {tx.custom_description && (
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tx.custom_description}>{tx.custom_description}</div>
         )}
       </td>
       <td style={{ minWidth: 200, maxWidth: 320 }}>
@@ -779,25 +531,9 @@ const TransactionRowDesktop = memo(function TransactionRowDesktop({ tx, selected
         </span>
       </td>
       <td className="td-mono" style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-          {linkedCount > 0 && (
-            <span
-              onClick={e => { e.stopPropagation(); onShowLinked(tx) }}
-              title={`${linkedCount} compras ligadas`}
-              style={{
-                fontSize: 11, padding: '2px 6px', borderRadius: 4, cursor: 'pointer',
-                background: 'rgba(201,168,76,.15)', color: 'var(--accent)',
-                fontFamily: 'var(--mono)', fontWeight: 700,
-                border: '1px solid rgba(201,168,76,.3)',
-              }}
-            >
-              📄 {linkedCount}
-            </span>
-          )}
-          <span style={{ color: isSalary ? 'var(--accent)' : tx.flow === 'INCOME' ? 'var(--green)' : 'var(--red)' }}>
-            {isSalary ? '✦ ' : (tx.flow === 'INCOME' ? '+' : '-')}{formatCLP(tx.amount)}
-          </span>
-        </div>
+        <span style={{ color: isSalary ? 'var(--accent)' : tx.flow === 'INCOME' ? 'var(--green)' : 'var(--red)' }}>
+          {isSalary ? '✦ ' : (tx.flow === 'INCOME' ? '+' : '-')}{formatCLP(tx.amount)}
+        </span>
       </td>
       {selectedId && (
         <td className="td-mono" style={{ textAlign: 'right', color: (tx.running_balance ?? 0) >= 0 ? 'var(--text-muted)' : 'var(--red)', whiteSpace: 'nowrap' }}>
@@ -808,24 +544,15 @@ const TransactionRowDesktop = memo(function TransactionRowDesktop({ tx, selected
   )
 })
 
-const TransactionCardMobile = memo(function TransactionCardMobile({ tx, selectedId, onEdit, onShowLinked }) {
+const TransactionCardMobile = memo(function TransactionCardMobile({ tx, selectedId, onEdit }) {
   const tags = tx.tags ?? []
   const isIncome = tx.flow === 'INCOME'
-  const isSalaryCard = tx.tags?.includes('sueldo') || tx.category === 'sueldo'
-  const linkedCount = tx.meta?.paidPurchaseIds?.length || 0
+  const isSalaryCard = tx.tags?.some(t => t.toLowerCase() === 'sueldo')
   return (
     <div className={`tx-card${isSalaryCard ? ' tx-card-salary' : ''}`} onClick={() => onEdit(tx)}>
       <div className="tx-card-top">
         <span className="tx-card-date">{formatDate(tx.date)}</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {linkedCount > 0 && (
-            <span
-              onClick={e => { e.stopPropagation(); onShowLinked(tx) }}
-              style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, cursor: 'pointer', background: 'rgba(201,168,76,.15)', color: 'var(--accent)', fontFamily: 'var(--mono)', fontWeight: 700, border: '1px solid rgba(201,168,76,.3)' }}
-            >
-              📄 {linkedCount}
-            </span>
-          )}
           <span className="tx-card-amt" style={{ color: isSalaryCard ? 'var(--accent)' : isIncome ? 'var(--green)' : 'var(--red)' }}>
             {isSalaryCard ? '✦ ' : (isIncome ? '+' : '-')}{formatCLP(tx.amount)}
           </span>
@@ -834,7 +561,7 @@ const TransactionCardMobile = memo(function TransactionCardMobile({ tx, selected
       <div className="tx-card-desc" style={{ color: 'var(--accent)', fontFamily: 'var(--mono)', fontSize: 11 }}>
         {tx.description}
         {tx.cc_statement_id && <span title="Ver detalle TC" style={{ fontSize: 11, marginLeft: 5 }}>📄</span>}
-        {tx.key_user && <span style={{ color: 'var(--text-dim)', marginLeft: 6 }}>{tx.key_user}</span>}
+        {tx.custom_description && <span style={{ color: 'var(--text-dim)', marginLeft: 6 }}>{tx.custom_description}</span>}
       </div>
       {tx.notes && (
         <div style={{ fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
@@ -899,7 +626,6 @@ export default function Ledger() {
   const [loading, setLoading]     = useState(true)
   const [showAdd, setShowAdd]       = useState(false)
   const [editing, setEditing]       = useState(null)
-  const [linkedPayment, setLinkedPayment] = useState(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [showScrollTop, setShowScrollTop] = useState(false)
 
@@ -926,43 +652,57 @@ export default function Ledger() {
       return
     }
     setLoading(true)
-    const params = { year, account_id: selectedId }
-    if (selectedTags.length) params.tags = selectedTags.join(',')
-    if (flow) params.flow = flow
-    api.transactions(params)
+    api.transactions({ account_id: selectedId })
       .then(data => setTransactions(Array.isArray(data) ? data : (data?.transactions ?? [])))
       .catch(() => {})
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [year, selectedTags, flow, selectedId, syncVersion])
+  useEffect(() => { load() }, [selectedId, syncVersion])
 
   // Reset to page 1 whenever filters or page size change
   useEffect(() => { setPage(1) }, [search, selectedTags, flow, dateFrom, dateTo, year, pageSize])
 
+  // Compute running_balance from the account's current balance (newest → oldest).
+  // This avoids a window-function CTE in the backend; the account balance is always
+  // available from AccountContext and is mathematically equivalent.
+  const txsWithBalance = useMemo(() => {
+    if (!selectedAccount || !selectedId) return transactions
+    let balance = selectedAccount.balance
+    return transactions.map(tx => {
+      const rb = balance
+      const effect = tx.flow === 'INCOME' || tx.flow === 'OPENING'
+        ? tx.amount
+        : tx.flow === 'EXPENSE' ? -tx.amount : 0
+      balance -= effect
+      return { ...tx, running_balance: rb }
+    })
+  }, [transactions, selectedAccount, selectedId])
+
   // Pre-compute lowercase search fields once when transactions load, not on every keystroke
   const searchIndex = useMemo(
-    () => new Map(transactions.map(tx => [tx.id, {
-      desc:  tx.description?.toLowerCase() ?? '',
-      key:   tx.key_user?.toLowerCase()    ?? '',
-      notes: tx.notes?.toLowerCase()       ?? '',
-      cat:   tx.category?.toLowerCase()    ?? '',
-      tags:  tx.tags?.map(t => t.toLowerCase()) ?? [],
+    () => new Map(txsWithBalance.map(tx => [tx.id, {
+      desc:   tx.description?.toLowerCase()         ?? '',
+      custom: tx.custom_description?.toLowerCase()  ?? '',
+      notes:  tx.notes?.toLowerCase()               ?? '',
+      tags:   tx.tags?.map(t => t.toLowerCase())    ?? [],
     }])),
-    [transactions]
+    [txsWithBalance]
   )
 
   const filtered = useMemo(() => {
-    let list = transactions
+    let list = txsWithBalance
+    if (year) list = list.filter(tx => tx.date?.slice(0, 4) === String(year))
+    if (flow) list = list.filter(tx => tx.flow === flow)
+    if (selectedTags.length) list = list.filter(tx => selectedTags.every(st => tx.tags?.some(t => tagEq(t, st))))
     if (search.trim()) {
       const q = search.trim().toLowerCase()
       list = list.filter(tx => {
         const idx = searchIndex.get(tx.id)
         return idx && (
-          idx.desc.includes(q)  ||
-          idx.key.includes(q)   ||
-          idx.notes.includes(q) ||
-          idx.cat.includes(q)   ||
+          idx.desc.includes(q)   ||
+          idx.custom.includes(q) ||
+          idx.notes.includes(q)  ||
           idx.tags.some(t => t.includes(q))
         )
       })
@@ -970,21 +710,20 @@ export default function Ledger() {
     if (dateFrom) list = list.filter(tx => tx.date?.slice(0, 10) >= dateFrom)
     if (dateTo)   list = list.filter(tx => tx.date?.slice(0, 10) <= dateTo)
     return list
-  }, [transactions, searchIndex, search, dateFrom, dateTo])
+  }, [txsWithBalance, searchIndex, year, flow, selectedTags, search, dateFrom, dateTo])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
   const safePage   = Math.min(page, totalPages)
   const pageRows   = filtered.slice((safePage - 1) * pageSize, safePage * pageSize)
 
-  // running_balance is only meaningful when scoped to a single account
-  const curSaldo = selectedId && filtered.length > 0 ? (filtered[0].running_balance ?? null) : null
+  // curSaldo is the account's all-time current balance (always accurate, no tx dependency)
+  const curSaldo = selectedId && selectedAccount ? (selectedAccount.balance ?? null) : null
 
   const handleUpdate = useCallback((updated) => {
     setTransactions(prev => prev.map(t => t.id === updated.id ? updated : t))
   }, [])
 
   const handleEdit = useCallback((tx) => setEditing(tx), [])
-  const handleShowLinked = useCallback((tx) => setLinkedPayment(tx), [])
 
   return (
     <div className="fade">
@@ -1105,7 +844,7 @@ export default function Ledger() {
                 </thead>
                 <tbody>
                   {pageRows.map(tx => (
-                    <TransactionRowDesktop key={tx.id} tx={tx} selectedId={selectedId} onEdit={handleEdit} onShowLinked={handleShowLinked} />
+                    <TransactionRowDesktop key={tx.id} tx={tx} selectedId={selectedId} onEdit={handleEdit} />
                   ))}
                 </tbody>
               </table>
@@ -1114,7 +853,7 @@ export default function Ledger() {
             {/* Mobile card list */}
             <div className="tx-list">
               {pageRows.map(tx => (
-                <TransactionCardMobile key={tx.id} tx={tx} selectedId={selectedId} onEdit={handleEdit} onShowLinked={handleShowLinked} />
+                <TransactionCardMobile key={tx.id} tx={tx} selectedId={selectedId} onEdit={handleEdit} />
               ))}
             </div>
 
@@ -1150,13 +889,6 @@ export default function Ledger() {
           selectedAccount={selectedAccount}
         />
       )}
-      {linkedPayment && (
-        <LinkedPurchasesModal
-          payment={linkedPayment}
-          onClose={() => setLinkedPayment(null)}
-        />
-      )}
-
       {showScrollTop && (
         <button
           onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}

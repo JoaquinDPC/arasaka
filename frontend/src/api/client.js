@@ -104,14 +104,8 @@ export const api = {
   tagBudgets:      (year)  => get(`/tag-budgets?year=${year}`),
   upsertTagBudget: (body)  => put('/tag-budgets', body),
 
-  // Budgets
-  budgets:           (year) => get(`/budgets?year=${year}`),
-  upsertBudget:      (body) => put('/budgets', body),
-  upsertBudgetsBase: (body) => put('/budgets/base', body),
-
   // Tag inference
-  inferTags:          (description) => post('/tags/infer', { description }),
-  updateUserSettings: (body)        => put('/users/settings', body),
+  inferTags: (description, accountId) => post('/tags/infer', { description, account_id: accountId }),
 
   // Sync — bankId is optional; omit to sync all configured banks
   sync:            (bankId) => post('/sync', bankId ? { bank_id: bankId } : {}),
@@ -130,13 +124,6 @@ export const api = {
 
   // Active installment plans from credit card items (current < total)
   installments: () => get('/reports/installments'),
-
-  // Link CC purchases to a payment (sets meta.paidPurchaseIds on payment, meta.paidByPaymentId on each purchase)
-  linkPurchases: (paymentId, purchaseIds) => fetch(`/api/transactions/${paymentId}/link-purchases`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ purchase_ids: purchaseIds }),
-  }).then(async r => { if (!r.ok) throw new Error((await r.json()).error || String(r.status)) }),
 
   // Credit card
   ccStatements:   ()         => get('/credit-card/statements'),

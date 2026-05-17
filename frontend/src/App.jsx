@@ -14,7 +14,11 @@ import Debts from './pages/Debts'
 import Import from './pages/Import'
 import CreditCard from './pages/CreditCard'
 
+const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS_AUTH === 'true'
+const DEV_USER = { id: 1, email: 'dev@local' }
+
 function getUser() {
+  if (DEV_BYPASS) return DEV_USER
   try { return JSON.parse(localStorage.getItem('arasaka_user')) } catch { return null }
 }
 
@@ -27,8 +31,8 @@ export default function App() {
     setUser(null)
   }, [])
 
-  // Auto-logout when any API call receives a 401
   useEffect(() => {
+    if (DEV_BYPASS) return
     window.addEventListener('arasaka:unauthorized', handleLogout)
     return () => window.removeEventListener('arasaka:unauthorized', handleLogout)
   }, [handleLogout])

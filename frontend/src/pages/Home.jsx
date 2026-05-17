@@ -70,7 +70,7 @@ function MovDetail({ tx, onClose }) {
     <div className="overlay fade" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={{ width: 420 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-          <CatIcon name={tx.tags?.[0] ?? tx.category} size={18} style={{ flexShrink: 0 }} />
+          <CatIcon name={tx.tags?.[0]} size={18} style={{ flexShrink: 0 }} />
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 16, fontWeight: 600 }}>{tx.description}</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{formatDate(tx.date)}</div>
@@ -287,7 +287,7 @@ export default function Home() {
                     {fmtDate(g.date)}
                   </div>
                   {g.items.map(tx => {
-                    const iconName = tx.tags?.[0] ?? tx.category
+                    const iconName = tx.tags?.[0]
                     const color = getCatColor(iconName)
                     const tags = tx.tags ?? []
                     return (

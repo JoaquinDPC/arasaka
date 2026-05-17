@@ -14,29 +14,6 @@ const NOW = new Date()
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function readSalary() {
-  try {
-    const u = JSON.parse(localStorage.getItem('arasaka_user'))
-    return u?.settings?.monthly_salary ?? 0
-  } catch { return 0 }
-}
-
-function writeSalaryLocal(val) {
-  try {
-    const u = JSON.parse(localStorage.getItem('arasaka_user'))
-    if (u) localStorage.setItem('arasaka_user', JSON.stringify({
-      ...u, settings: { ...(u.settings ?? {}), monthly_salary: val },
-    }))
-  } catch {}
-}
-
-function readSettings() {
-  try {
-    const u = JSON.parse(localStorage.getItem('arasaka_user'))
-    return u?.settings ?? {}
-  } catch { return {} }
-}
-
 // All maps are keyed by lowercase tag. Use this to look up.
 function lk(tag) { return (tag ?? '').toLowerCase() }
 
@@ -461,7 +438,7 @@ function AddTagForm({ onAdd, onCancel }) {
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function Categories() {
-  const { selectedId } = useAccount()
+  const { selectedId, selectedAccount } = useAccount()
   const { personalEntries, loaded: tagsLoaded } = useTags()
 
   const [view, setView]   = useState('month')
@@ -483,11 +460,15 @@ export default function Categories() {
   const [loadingMonthly, setLoadingMonthly] = useState(false)
   const [loadingBudgets, setLoadingBudgets] = useState(true)
 
-  const [salary, setSalary]       = useState(readSalary)
+  const [salary, setSalary]       = useState(0)
   const [pickerTag, setPickerTag] = useState(null)
   const [selectedTag, setSelectedTag] = useState(null)
   const [addingTag, setAddingTag] = useState(false)
   const [confirmDeleteTag, setConfirmDeleteTag] = useState(null)
+
+  useEffect(() => {
+    setSalary(selectedAccount?.settings?.monthly_salary ?? 0)
+  }, [selectedAccount])
 
   // Load tag budgets — normalize keys to lowercase
   useEffect(() => {
@@ -551,12 +532,10 @@ export default function Categories() {
 
   const handleSalaryEdit = useCallback(async (val) => {
     setSalary(val)
-    writeSalaryLocal(val)
     try {
-      const s = readSettings()
-      await api.updateUserSettings({ ...s, monthly_salary: val })
+      if (selectedId) await api.updateAccount(selectedId, { monthly_salary: val })
     } catch {}
-  }, [])
+  }, [selectedId])
 
   async function handleBudgetEdit(tag, amount) {
     setBudgets(prev => ({ ...prev, [lk(tag)]: amount }))

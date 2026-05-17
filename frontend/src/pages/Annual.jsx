@@ -151,10 +151,10 @@ export default function Annual() {
                     <li key={i} className="top-item" style={{ padding: '3px 0' }}>
                       <div className="top-left">
                         <span style={{ width: 18, fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--mono)', textAlign: 'right', flexShrink: 0 }}>{i + 1}.</span>
-                        <CatIcon name={t.category} size={14} style={{ flexShrink: 0 }} />
+                        <CatIcon name={t.tags?.[0]} size={14} style={{ flexShrink: 0 }} />
                         <div>
                           <div className="top-desc">{t.description ?? t.desc ?? '—'}</div>
-                          <div className="top-cat">{t.date?.slice(0, 10)} · {t.category}</div>
+                          <div className="top-cat">{t.date?.slice(0, 10)} · {t.tags?.[0] ?? '—'}</div>
                         </div>
                       </div>
                       <div className="top-amt">-{formatCLP(t.amount)}</div>

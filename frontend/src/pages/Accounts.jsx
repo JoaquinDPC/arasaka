@@ -4,6 +4,7 @@ import { formatCLP, formatDate } from '../lib/formatters'
 import { ACCT_COLORS, SUPPORTED_BANKS, ACCT_TYPES, getBankLabel, getCatColor } from '../lib/constants'
 import Spinner from '../components/Spinner'
 import CatIcon from '../components/CatIcon'
+import CustomSelect from '../components/CustomSelect'
 
 // ── TC Text Parser ──────────────────────────────────────────────────────────
 
@@ -239,9 +240,6 @@ function TCImportModal({ account, onClose, onDone }) {
         amount:      r.monto,
         flow:        'EXPENSE',
         tags:        r.tags,
-        meta:        r.cuotas
-          ? { source: 'tc_import', installments: { current: r.cuotas.num, total: r.cuotas.total } }
-          : { source: 'tc_import' },
       }))
       await api.createTransactionBatch(account.id, transactions)
       onDone()
@@ -266,8 +264,43 @@ function TCImportModal({ account, onClose, onDone }) {
   )
 }
 
+function PillToggle({ value, onChange }) {
+  return (
+    <div
+      onClick={() => onChange(!value)}
+      style={{
+        width: 40, height: 22, borderRadius: 11, flexShrink: 0,
+        background: value ? 'var(--accent)' : 'var(--surface2)',
+        border: `1px solid ${value ? 'var(--accent)' : 'var(--border)'}`,
+        cursor: 'pointer', position: 'relative',
+        transition: 'background var(--t), border-color var(--t)',
+      }}
+    >
+      <div style={{
+        position: 'absolute', top: 2,
+        left: value ? 20 : 2,
+        width: 16, height: 16, borderRadius: '50%',
+        background: value ? '#0c0c0e' : 'var(--text-dim)',
+        transition: 'left var(--t)',
+      }} />
+    </div>
+  )
+}
+
+function SettingRow({ label, description, children }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{label}</div>
+        {description && <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>{description}</div>}
+      </div>
+      {children}
+    </div>
+  )
+}
+
 function AccountModal({ account, onSave, onDelete, onClose }) {
-  const hasStoredPassword = account?.settings?.pdf_password !== undefined && account?.settings?.pdf_password !== ''
+  const hasStoredPassword = !!(account?.settings?.pdf_password)
   const [f, setF] = useState({
     name:              account?.name      ?? '',
     bank_id:           account?.bank_id   ?? SUPPORTED_BANKS[0]?.id ?? 'banco_de_chile',
@@ -276,13 +309,17 @@ function AccountModal({ account, onSave, onDelete, onClose }) {
     inference_enabled: account?.settings?.inference_enabled ?? true,
     pdf_password:      '',
   })
+  const [showPwd, setShowPwd] = useState(false)
   const set = (k, v) => setF(p => ({ ...p, [k]: v }))
   const isCC = f.type === 'Tarjeta de crédito'
+
   return (
     <div className="overlay fade" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={{ width: 440 }}>
         <div className="modal-ttl">{account ? 'Editar cuenta' : 'Nueva cuenta'}</div>
         <div style={{ height: 4, borderRadius: 2, background: f.color, marginBottom: 20, opacity: .7 }} />
+
+        {/* ── Datos ── */}
         <div className="fgrid">
           <div className="ff full">
             <div className="flbl">Nombre</div>
@@ -290,15 +327,19 @@ function AccountModal({ account, onSave, onDelete, onClose }) {
           </div>
           <div className="ff">
             <div className="flbl">Banco</div>
-            <select className="finput" value={f.bank_id} onChange={e => set('bank_id', e.target.value)}>
-              {SUPPORTED_BANKS.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
-            </select>
+            <CustomSelect
+              value={f.bank_id}
+              onChange={v => set('bank_id', v)}
+              options={SUPPORTED_BANKS.map(b => ({ value: b.id, label: b.label }))}
+            />
           </div>
           <div className="ff">
             <div className="flbl">Tipo</div>
-            <select className="finput" value={f.type} onChange={e => set('type', e.target.value)}>
-              {ACCT_TYPES.map(t => <option key={t}>{t}</option>)}
-            </select>
+            <CustomSelect
+              value={f.type}
+              onChange={v => set('type', v)}
+              options={ACCT_TYPES.map(t => ({ value: t, label: t }))}
+            />
           </div>
           <div className="ff full">
             <div className="flbl">Color</div>
@@ -309,37 +350,60 @@ function AccountModal({ account, onSave, onDelete, onClose }) {
               ))}
             </div>
           </div>
-          <div className="ff full" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
-            <div className="flbl" style={{ marginBottom: 0 }}>Inferencia de tags</div>
-            <button
-              type="button"
-              onClick={() => set('inference_enabled', !f.inference_enabled)}
-              style={{
-                fontSize: 10, padding: '3px 10px', borderRadius: 4, cursor: 'pointer',
-                fontWeight: 700,
-                border: `1px solid ${f.inference_enabled ? 'var(--accent)66' : 'var(--border)'}`,
-                background: f.inference_enabled ? 'var(--accent)22' : 'var(--surface2)',
-                color: f.inference_enabled ? 'var(--accent)' : 'var(--text-dim)',
-                transition: 'all var(--t)',
-              }}
-            >
-              {f.inference_enabled ? 'ON' : 'OFF'}
-            </button>
-          </div>
-          {isCC && (
-            <div className="ff full">
-              <div className="flbl">Clave PDF</div>
+        </div>
+
+        {/* ── Separador Configuración ── */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '22px 0 18px' }}>
+          <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-dim)' }}>Configuración</span>
+          <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+
+          {/* Inference toggle */}
+          <SettingRow label="Inferencia de tags" description="Sugerencias automáticas al escribir transacciones">
+            <PillToggle value={f.inference_enabled} onChange={v => set('inference_enabled', v)} />
+          </SettingRow>
+
+          {/* PDF password */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <SettingRow label="Clave PDF" description="Descifra PDFs automáticamente al importar">
+              {hasStoredPassword && !f.pdf_password && (
+                <span style={{
+                  fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, flexShrink: 0,
+                  background: 'rgba(76,175,125,.12)', border: '1px solid rgba(76,175,125,.25)',
+                  color: 'var(--green)', letterSpacing: '0.04em',
+                }}>✓ Guardada</span>
+              )}
+            </SettingRow>
+            <div style={{ position: 'relative' }}>
               <input
                 className="finput"
-                type="password"
-                placeholder={hasStoredPassword ? 'Clave guardada — dejar vacío para no cambiar' : 'Sin clave guardada'}
+                type={showPwd ? 'text' : 'password'}
+                placeholder={hasStoredPassword ? 'Dejar vacío para no cambiar' : 'Sin clave configurada'}
                 value={f.pdf_password}
                 onChange={e => set('pdf_password', e.target.value)}
+                style={{ paddingRight: 38 }}
               />
+              <button
+                type="button"
+                onClick={() => setShowPwd(v => !v)}
+                title={showPwd ? 'Ocultar' : 'Mostrar'}
+                style={{
+                  position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: showPwd ? 'var(--accent)' : 'var(--text-dim)',
+                  fontSize: 14, lineHeight: 1, padding: 2, transition: 'color var(--t)',
+                }}
+              >
+                {showPwd ? '●' : '○'}
+              </button>
             </div>
-          )}
+          </div>
         </div>
-        <div className="mfooter">
+
+        <div className="mfooter" style={{ marginTop: 24 }}>
           {onDelete && (
             <button onClick={onDelete} style={{ padding: '8px 16px', background: 'rgba(224,92,92,.15)', border: '1px solid rgba(224,92,92,.3)', borderRadius: 7, color: 'var(--red)', fontSize: 13, fontFamily: 'var(--font)', cursor: 'pointer', marginRight: 'auto' }}>
               Eliminar

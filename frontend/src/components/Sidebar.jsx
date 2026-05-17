@@ -66,9 +66,117 @@ const NAV_ITEMS = [
   { to: '/importar',     label: 'Importar',     icon: '↑' },
 ]
 
+function AccountSettingsModal({ account, onClose, onSaved }) {
+  const [inference, setInference]   = useState(account.settings?.inference_enabled ?? true)
+  const [pwd, setPwd]               = useState('')
+  const [showPwd, setShowPwd]       = useState(false)
+  const [saving, setSaving]         = useState(false)
+  const hasStored                   = !!(account.settings?.pdf_password)
+
+  async function save() {
+    setSaving(true)
+    try {
+      await api.updateAccount(account.id, { inference_enabled: inference, pdf_password: pwd || undefined })
+      onSaved()
+      onClose()
+    } catch { /* keep open */ }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div
+      onClick={e => e.target === e.currentTarget && onClose()}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', backdropFilter: 'blur(6px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+    >
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 28, width: 360, maxWidth: '94vw' }}>
+
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>Configuración</div>
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>{account.name}</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: 4 }}>✕</button>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+          {/* Inference */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+            <div>
+              <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>Inferencia de tags</div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Sugerencias al escribir transacciones</div>
+            </div>
+            <div
+              onClick={() => setInference(v => !v)}
+              style={{
+                width: 40, height: 22, borderRadius: 11, flexShrink: 0,
+                background: inference ? 'var(--accent)' : 'var(--surface2)',
+                border: `1px solid ${inference ? 'var(--accent)' : 'var(--border)'}`,
+                cursor: 'pointer', position: 'relative', transition: 'background var(--t), border-color var(--t)',
+              }}
+            >
+              <div style={{
+                position: 'absolute', top: 2, left: inference ? 20 : 2,
+                width: 16, height: 16, borderRadius: '50%',
+                background: inference ? '#0c0c0e' : 'var(--text-dim)',
+                transition: 'left var(--t)',
+              }} />
+            </div>
+          </div>
+
+          {/* PDF password */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>Clave PDF</div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Para descifrar PDFs al importar</div>
+              </div>
+              {hasStored && !pwd && (
+                <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, flexShrink: 0, background: 'rgba(76,175,125,.12)', border: '1px solid rgba(76,175,125,.25)', color: 'var(--green)', letterSpacing: '0.04em' }}>
+                  ✓ Guardada
+                </span>
+              )}
+            </div>
+            <div style={{ position: 'relative' }}>
+              <input
+                type={showPwd ? 'text' : 'password'}
+                value={pwd}
+                onChange={e => setPwd(e.target.value)}
+                placeholder={hasStored ? 'Dejar vacío para no cambiar' : 'Sin clave configurada'}
+                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 38px 9px 13px', borderRadius: 7, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: 13, fontFamily: 'var(--font)', outline: 'none' }}
+                onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+                onBlur={e => e.target.style.borderColor = 'var(--border)'}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPwd(v => !v)}
+                style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: showPwd ? 'var(--accent)' : 'var(--text-dim)', fontSize: 14, lineHeight: 1, padding: 2, transition: 'color var(--t)' }}
+              >
+                {showPwd ? '●' : '○'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 }}>
+          <button onClick={onClose} style={{ padding: '8px 18px', borderRadius: 7, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font)', transition: 'var(--t)' }}>
+            Cancelar
+          </button>
+          <button onClick={save} disabled={saving} style={{ padding: '8px 18px', borderRadius: 7, background: 'var(--accent)', border: 'none', color: '#0c0c0e', fontSize: 13, fontWeight: 700, cursor: saving ? 'default' : 'pointer', fontFamily: 'var(--font)', opacity: saving ? .6 : 1 }}>
+            {saving ? 'Guardando…' : 'Guardar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AccountSwitcher() {
-  const { accounts, selectedAccount, selectedId, select } = useAccount()
-  const [open, setOpen] = useState(false)
+  const { accounts, selectedAccount, selectedId, select, reload } = useAccount()
+  const [open, setOpen]           = useState(false)
+  const [settingsAcct, setSettingsAcct] = useState(null)
 
   const totalBalance = accounts.reduce((sum, a) => sum + (a.balance ?? 0), 0)
   const selectedIdx  = selectedAccount ? accounts.indexOf(selectedAccount) : -1
@@ -80,23 +188,50 @@ function AccountSwitcher() {
   }
 
   return (
+    <>
+    {settingsAcct && (
+      <AccountSettingsModal
+        account={settingsAcct}
+        onClose={() => setSettingsAcct(null)}
+        onSaved={reload}
+      />
+    )}
     <div className="acct-switcher">
-      <div
-        onClick={() => setOpen(v => !v)}
-        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 6px', borderRadius: 7, cursor: 'pointer', transition: 'background var(--t)' }}
-        onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
-        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-      >
-        <div style={{ width: 8, height: 8, borderRadius: '50%', background: activeColor, flexShrink: 0 }} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: activeColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {selectedAccount ? selectedAccount.name : 'Todas las cuentas'}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 0' }}>
+        <div
+          onClick={() => setOpen(v => !v)}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px', borderRadius: 7, cursor: 'pointer', transition: 'background var(--t)', flex: 1, minWidth: 0 }}
+          onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+        >
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: activeColor, flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: activeColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {selectedAccount ? selectedAccount.name : 'Todas las cuentas'}
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--mono)' }}>
+              {formatCLP(selectedAccount ? (selectedAccount.balance ?? 0) : totalBalance)}
+            </div>
           </div>
-          <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--mono)' }}>
-            {formatCLP(selectedAccount ? (selectedAccount.balance ?? 0) : totalBalance)}
-          </div>
+          <span style={{ fontSize: 9, color: 'var(--text-dim)', flexShrink: 0 }}>{open ? '▲' : '▼'}</span>
         </div>
-        <span style={{ fontSize: 9, color: 'var(--text-dim)' }}>{open ? '▲' : '▼'}</span>
+
+        {/* Gear button — only when a specific account is selected */}
+        {selectedAccount && (
+          <button
+            onClick={e => { e.stopPropagation(); setSettingsAcct(selectedAccount) }}
+            title="Configuración de cuenta"
+            style={{
+              background: 'none', border: '1px solid transparent', borderRadius: 6,
+              color: 'var(--text-dim)', cursor: 'pointer', fontSize: 13, lineHeight: 1,
+              padding: '5px 6px', flexShrink: 0, transition: 'color var(--t), border-color var(--t)',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.borderColor = 'var(--accent)44' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-dim)'; e.currentTarget.style.borderColor = 'transparent' }}
+          >
+            ⚙
+          </button>
+        )}
       </div>
 
       {open && (
@@ -146,52 +281,10 @@ function AccountSwitcher() {
         </div>
       )}
     </div>
+    </>
   )
 }
 
-function InferenceToggle() {
-  const [enabled, setEnabled] = useState(() => {
-    try {
-      const u = JSON.parse(localStorage.getItem('arasaka_user'))
-      return u?.settings?.inference_enabled !== false
-    } catch { return true }
-  })
-  const [saving, setSaving] = useState(false)
-
-  async function toggle() {
-    const next = !enabled
-    setEnabled(next)
-    setSaving(true)
-    try {
-      const u = JSON.parse(localStorage.getItem('arasaka_user'))
-      const nextSettings = { ...(u?.settings ?? { personal_enabled: true, app_enabled: true }), inference_enabled: next }
-      await api.updateUserSettings(nextSettings)
-      if (u) localStorage.setItem('arasaka_user', JSON.stringify({ ...u, settings: nextSettings }))
-    } catch { setEnabled(!next) }
-    finally { setSaving(false) }
-  }
-
-  return (
-    <div style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-      <span style={{ fontSize: 11, color: 'var(--text-dim)', letterSpacing: '0.03em' }}>
-        Inferencia tags
-      </span>
-      <button
-        onClick={toggle}
-        disabled={saving}
-        style={{
-          fontSize: 10, padding: '3px 10px', borderRadius: 4, cursor: saving ? 'default' : 'pointer',
-          fontWeight: 700, border: `1px solid ${enabled ? 'var(--accent)66' : 'var(--border)'}`,
-          background: enabled ? 'var(--accent)22' : 'var(--surface2)',
-          color: enabled ? 'var(--accent)' : 'var(--text-dim)',
-          transition: 'all var(--t)',
-        }}
-      >
-        {saving ? '…' : enabled ? 'ON' : 'OFF'}
-      </button>
-    </div>
-  )
-}
 
 export default function Sidebar({ user, onLogout, open, onClose }) {
   return (
@@ -215,8 +308,6 @@ export default function Sidebar({ user, onLogout, open, onClose }) {
           </NavLink>
         ))}
       </nav>
-
-      <InferenceToggle />
 
       <SyncButton />
 
