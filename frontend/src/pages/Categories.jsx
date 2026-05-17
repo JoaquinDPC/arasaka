@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { api } from '../api/client'
 import { formatCLP } from '../lib/formatters'
-import { getCatColor, MONTH_ABBR } from '../lib/constants'
+import { getCatColor, HASH_PALETTE, MONTH_ABBR } from '../lib/constants'
 import { useTags, clearTagsCache } from '../lib/useTags'
 import Spinner from '../components/Spinner'
 import CatIcon from '../components/CatIcon'
@@ -17,30 +17,41 @@ const NOW = new Date()
 // All maps are keyed by lowercase tag. Use this to look up.
 function lk(tag) { return (tag ?? '').toLowerCase() }
 
-// ── IconPickerModal ──────────────────────────────────────────────────────────
+// ── TagAppearanceModal ───────────────────────────────────────────────────────
+// Combined icon + color picker. Each selection saves immediately; modal stays open.
 
-function IconPickerModal({ tag, currentIcon, onSelect, onClose }) {
+function TagAppearanceModal({ tag, currentIcon, currentColor, onSelectIcon, onSelectColor, onClose }) {
   const ref = useRef(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
   useEffect(() => {
-    function h(e) { if (ref.current && !ref.current.contains(e.target)) onClose() }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [onClose])
+    function onKey(e) { if (e.key === 'Escape') onCloseRef.current() }
+    function onMouse(e) { if (ref.current && !ref.current.contains(e.target)) onCloseRef.current() }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onMouse)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onMouse)
+    }
+  }, [])
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.65)' }}>
-      <div ref={ref} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, width: 360, maxHeight: '80vh', overflowY: 'auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>Ícono — {tag}</div>
+      <div ref={ref} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, width: 380, maxWidth: 'calc(100vw - 32px)', maxHeight: '85vh', overflowY: 'auto', overflowX: 'hidden', boxSizing: 'border-box' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{tag}</div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: 18 }}>×</button>
         </div>
+
+        {/* Icon section */}
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', letterSpacing: '0.07em', marginBottom: 8 }}>ÍCONO</div>
         <button
-          onClick={() => onSelect(null)}
-          style={{ width: '100%', marginBottom: 10, padding: '6px 10px', background: !currentIcon ? 'var(--accent)22' : 'var(--surface2)', border: `1px solid ${!currentIcon ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 6, color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer' }}
+          onClick={() => onSelectIcon(null)}
+          style={{ width: '100%', marginBottom: 8, padding: '6px 10px', background: !currentIcon ? 'var(--accent)22' : 'var(--surface2)', border: `1px solid ${!currentIcon ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 6, color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer' }}
         >
           Auto (por nombre)
         </button>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 6 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 5, marginBottom: 20 }}>
           {ICON_NAMES.map(name => {
             const Icon = ICON_BY_NAME[name]
             const active = currentIcon === name
@@ -48,12 +59,36 @@ function IconPickerModal({ tag, currentIcon, onSelect, onClose }) {
               <button
                 key={name}
                 title={name}
-                onClick={() => onSelect(name)}
-                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '8px 4px', background: active ? 'var(--accent)22' : 'var(--surface2)', border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 6, cursor: 'pointer' }}
+                onClick={() => onSelectIcon(name)}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 6, aspectRatio: '1', background: active ? 'var(--accent)22' : 'var(--surface2)', border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 6, cursor: 'pointer', boxSizing: 'border-box', width: '100%' }}
               >
-                <Icon size={16} color={active ? 'var(--accent)' : 'var(--text-muted)'} strokeWidth={1.5} />
-                <span style={{ fontSize: 8, color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{name}</span>
+                <Icon size={18} color={active ? 'var(--accent)' : 'var(--text-muted)'} strokeWidth={1.5} />
               </button>
+            )
+          })}
+        </div>
+
+        {/* Divider */}
+        <div style={{ borderTop: '1px solid var(--border)', marginBottom: 16 }} />
+
+        {/* Color section */}
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', letterSpacing: '0.07em', marginBottom: 8 }}>COLOR</div>
+        <button
+          onClick={() => onSelectColor(null)}
+          style={{ width: '100%', marginBottom: 8, padding: '6px 10px', background: !currentColor ? 'var(--accent)22' : 'var(--surface2)', border: `1px solid ${!currentColor ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 6, color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer' }}
+        >
+          Auto (por nombre)
+        </button>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 8 }}>
+          {HASH_PALETTE.map(hex => {
+            const active = currentColor === hex
+            return (
+              <button
+                key={hex}
+                title={hex}
+                onClick={() => onSelectColor(hex)}
+                style={{ width: '100%', aspectRatio: '1', borderRadius: 6, background: hex, border: `2px solid ${active ? '#fff' : 'transparent'}`, cursor: 'pointer', outline: active ? `2px solid ${hex}` : 'none', outlineOffset: 2 }}
+              />
             )
           })}
         </div>
@@ -98,7 +133,7 @@ function MiniBarChart({ values, budget, color, currentMonth }) {
 // ── SalaryDistBar ─────────────────────────────────────────────────────────────
 // budgets / spending are keyed by lowercase tag
 
-function SalaryDistBar({ tags, budgets, spending, salary, onEditSalary }) {
+function SalaryDistBar({ tags, budgets, spending, salary, onEditSalary, colorFor }) {
   const [editing, setEditing] = useState(false)
   const [input, setInput] = useState('')
 
@@ -124,7 +159,7 @@ function SalaryDistBar({ tags, budgets, spending, salary, onEditSalary }) {
     .filter(t => (budgets[lk(t)] ?? 0) > 0 && base > 0)
     .map(t => {
       const pct = Math.min((budgets[lk(t)] / base) * 100, 100 - runningPct)
-      const seg = { tag: t, pct, offset: runningPct, color: getCatColor(t) }
+      const seg = { tag: t, pct, offset: runningPct, color: (colorFor ? colorFor(t) : null) ?? getCatColor(t) }
       runningPct += pct
       return seg
     })
@@ -201,12 +236,12 @@ function SalaryDistBar({ tags, budgets, spending, salary, onEditSalary }) {
 // ── TagCard ──────────────────────────────────────────────────────────────────
 
 function TagCard({
-  tag, icon, budget, spent, salary, view, monthlyValues, currentMonth,
-  onEditBudget, onEditIcon, onDelete, onSelect, selected,
+  tag, icon, tagColor, budget, spent, salary, view, monthlyValues, currentMonth,
+  onEditBudget, onEditAppearance, onDelete, onSelect, selected,
 }) {
   const [editingBudget, setEditingBudget] = useState(false)
   const [budgetInput, setBudgetInput] = useState('')
-  const color = getCatColor(tag)
+  const color = tagColor ?? getCatColor(tag)
 
   const pct   = budget > 0 ? Math.min(100, spent / budget * 100) : 0
   const pctSalary = salary > 0 && budget > 0 ? (budget / salary * 100).toFixed(1) : null
@@ -238,11 +273,11 @@ function TagCard({
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
         <button
-          onClick={e => { e.stopPropagation(); onEditIcon(tag) }}
-          title="Cambiar ícono"
+          onClick={e => { e.stopPropagation(); onEditAppearance(tag) }}
+          title="Cambiar ícono y color"
           style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', flexShrink: 0 }}
         >
-          <CatIcon name={tag} overrideIcon={icon ?? null} size={18} />
+          <CatIcon name={tag} overrideIcon={icon ?? null} size={18} color={color} />
         </button>
         <span style={{ fontSize: 13, fontWeight: 700, color: selected ? color : 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tag}</span>
         {pctSalary && (
@@ -315,8 +350,8 @@ function TagCard({
 
 // ── AnnualDetailPanel ─────────────────────────────────────────────────────────
 
-function AnnualDetailPanel({ tag, icon, budget, monthlyValues, salary, onClose }) {
-  const color = getCatColor(tag)
+function AnnualDetailPanel({ tag, icon, tagColor, budget, monthlyValues, salary, onClose }) {
+  const color = tagColor ?? getCatColor(tag)
   const upToNow = monthlyValues.slice(0, NOW.getMonth() + 1)
   const total = upToNow.reduce((s, v) => s + v, 0)
   const avg = upToNow.length > 0 ? total / upToNow.length : 0
@@ -543,12 +578,27 @@ export default function Categories() {
   }
 
   async function handleSetIcon(tag, iconName) {
+    setEntries(prev => {
+      const exists = prev.some(e => e.tag === tag)
+      if (exists) return prev.map(e => e.tag === tag ? { ...e, icon: iconName ?? null } : e)
+      return [...prev, { tag, icon: iconName ?? null }]
+    })
     try {
       await api.setTagIcon(tag, iconName ?? '')
-      setEntries(prev => prev.map(e => e.tag === tag ? { ...e, icon: iconName ?? null } : e))
       clearTagsCache()
     } catch {}
-    setPickerTag(null)
+  }
+
+  async function handleSetColor(tag, colorHex) {
+    setEntries(prev => {
+      const exists = prev.some(e => e.tag === tag)
+      if (exists) return prev.map(e => e.tag === tag ? { ...e, color: colorHex ?? null } : e)
+      return [...prev, { tag, color: colorHex ?? null }]
+    })
+    try {
+      await api.setTagColor(tag, colorHex ?? '')
+      clearTagsCache()
+    } catch {}
   }
 
   async function handleDelete(tag) {
@@ -583,17 +633,22 @@ export default function Categories() {
     } else setYear(y => y + 1)
   }
 
-  const personalTags    = entries.map(e => e.tag).filter(t => txFor(t) > 0)
-  const spendingOnlyTags = Object.keys(spending).filter(k => !personalTags.some(p => lk(p) === k))
+  const personalTags = entries.map(e => e.tag)
 
   function txFor(tag)     { return txCount[lk(tag)] ?? 0 }
-  const allTags         = [...personalTags, ...spendingOnlyTags]
-    .sort((a, b) => txFor(b) - txFor(a))
+  const allTags = [...personalTags]
+    .sort((a, b) => {
+      const aBudgeted = (budgets[lk(a)] ?? 0) > 0
+      const bBudgeted = (budgets[lk(b)] ?? 0) > 0
+      if (aBudgeted !== bBudgeted) return aBudgeted ? -1 : 1
+      return (spending[lk(b)] ?? 0) - (spending[lk(a)] ?? 0)
+    })
 
   const pageCount   = Math.ceil(allTags.length / PAGE_SIZE)
   const visibleTags = allTags.slice(tagPage * PAGE_SIZE, (tagPage + 1) * PAGE_SIZE)
 
   function iconFor(tag)   { return entries.find(e => e.tag === tag)?.icon ?? null }
+  function colorFor(tag)  { return entries.find(e => e.tag === tag)?.color ?? null }
   function budgetFor(tag) { return budgets[lk(tag)] ?? 0 }
   function spentFor(tag)  { return spending[lk(tag)] ?? 0 }
 
@@ -603,10 +658,12 @@ export default function Categories() {
   return (
     <div className="fade">
       {pickerTag && (
-        <IconPickerModal
+        <TagAppearanceModal
           tag={pickerTag}
           currentIcon={pickerEntry?.icon ?? null}
-          onSelect={icon => handleSetIcon(pickerTag, icon)}
+          currentColor={colorFor(pickerTag)}
+          onSelectIcon={icon => handleSetIcon(pickerTag, icon)}
+          onSelectColor={hex => handleSetColor(pickerTag, hex)}
           onClose={() => setPickerTag(null)}
         />
       )}
@@ -677,6 +734,7 @@ export default function Categories() {
         spending={spending}
         salary={salary}
         onEditSalary={handleSalaryEdit}
+        colorFor={colorFor}
       />
 
       {/* Grid de cards */}
@@ -695,6 +753,7 @@ export default function Categories() {
                 key={tag}
                 tag={tag}
                 icon={iconFor(tag)}
+                tagColor={colorFor(tag)}
                 budget={budgetFor(tag)}
                 spent={spentFor(tag)}
                 salary={salary}
@@ -702,7 +761,7 @@ export default function Categories() {
                 monthlyValues={monthlyData[lk(tag)] ?? Array(12).fill(0)}
                 currentMonth={month}
                 onEditBudget={handleBudgetEdit}
-                onEditIcon={setPickerTag}
+                onEditAppearance={setPickerTag}
                 onDelete={handleDelete}
                 onSelect={t => setSelectedTag(prev => prev === t ? null : t)}
                 selected={selectedTag === tag}
@@ -735,6 +794,7 @@ export default function Categories() {
             <AnnualDetailPanel
               tag={selectedTag}
               icon={iconFor(selectedTag)}
+              tagColor={colorFor(selectedTag)}
               budget={budgetFor(selectedTag)}
               monthlyValues={monthlyData[lk(selectedTag)] ?? Array(12).fill(0)}
               salary={salary}
@@ -748,7 +808,7 @@ export default function Categories() {
               year={year}
               month={month}
               selectedId={selectedId}
-              color={getCatColor(selectedTag)}
+              color={colorFor(selectedTag) ?? getCatColor(selectedTag)}
               icon={iconFor(selectedTag)}
               total={spentFor(selectedTag)}
               onClose={() => setSelectedTag(null)}

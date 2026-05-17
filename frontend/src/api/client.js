@@ -39,6 +39,7 @@ async function put(path, body) {
   })
   if (res.status === 401) { handleUnauthorized(); throw new Error('unauthorized') }
   if (!res.ok) throw new Error(`PUT ${path} → ${res.status}`)
+  if (res.status === 204) return null
   return res.json()
 }
 
@@ -91,13 +92,14 @@ export const api = {
   updateAccount: (id, body)  => put(`/accounts/${id}`, body),
   deleteAccount: (id)        => del(`/accounts/${id}`),
 
-  // Tags (recognized categories sourced from the budgets table)
+  // Tags
   tags:              ()            => get('/tags'),
   usedTags:          (limit = 20) => get(`/tags/used?limit=${limit}`),
   personalTags:      ()            => get('/tags/personal'),
   savePersonalTag:   (tag)         => post('/tags/personal', { tag }),
   tagSpending:       (params = {}) => get(`/tags/spending${qs(params)}`),
   setTagIcon:        (tag, icon)   => put(`/tags/personal/${encodeURIComponent(tag)}/icon`, { icon }),
+  setTagColor:       (tag, color)  => put(`/tags/personal/${encodeURIComponent(tag)}/color`, { color }),
   deletePersonalTag: (tag)         => del(`/tags/personal/${encodeURIComponent(tag)}`),
 
   // Tag budgets

@@ -16,7 +16,7 @@ export const CAT_COLORS = {
   vacaciones:    '#afb04c',
 }
 
-const HASH_PALETTE = [
+export const HASH_PALETTE = [
   '#e07c5c', '#4caf7d', '#4cb8af', '#9b7fd4', '#d4884c',
   '#80af4c', '#c9a84c', '#af4c8a', '#7c9faf', '#c94c8a',
   '#afb04c', '#4c7caf', '#af7c4c', '#7caf4c', '#af4c7c',

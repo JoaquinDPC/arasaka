@@ -41,9 +41,9 @@ export function useTags() {
     if (!fetchPromise) {
       fetchPromise = Promise.all([api.tags(), api.usedTags(15), api.personalTags()])
         .then(([recognized, usedTags, personal]) => {
-          // personal is now UserTagEntry[] { tag, icon? } — handle both old string[] and new shape
+          // personal is UserTagEntry[] { tag, icon?, color? } — handle both old string[] and new shape
           const entries = Array.isArray(personal)
-            ? personal.map(p => typeof p === 'string' ? { tag: toTagFormat(p) } : { tag: toTagFormat(p.tag), icon: p.icon ?? null })
+            ? personal.map(p => typeof p === 'string' ? { tag: toTagFormat(p) } : { tag: toTagFormat(p.tag), icon: p.icon ?? null, color: p.color ?? null })
             : []
           cache = {
             recognized:      Array.isArray(recognized) ? recognized.map(toTagFormat) : [],

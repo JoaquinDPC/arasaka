@@ -302,12 +302,13 @@ function SettingRow({ label, description, children }) {
 function AccountModal({ account, onSave, onDelete, onClose }) {
   const hasStoredPassword = !!(account?.settings?.pdf_password)
   const [f, setF] = useState({
-    name:              account?.name      ?? '',
-    bank_id:           account?.bank_id   ?? SUPPORTED_BANKS[0]?.id ?? 'banco_de_chile',
-    type:              account?.type      ?? 'Cuenta corriente',
-    color:             account?.color     ?? ACCT_COLORS[0],
-    inference_enabled: account?.settings?.inference_enabled ?? true,
-    pdf_password:      '',
+    name:                  account?.name      ?? '',
+    bank_id:               account?.bank_id   ?? SUPPORTED_BANKS[0]?.id ?? 'banco_de_chile',
+    type:                  account?.type      ?? 'Cuenta corriente',
+    color:                 account?.color     ?? ACCT_COLORS[0],
+    app_tag_inference:     account?.settings?.app_tag_inference ?? true,
+    personal_tag_inference: account?.settings?.personal_tag_inference ?? true,
+    pdf_password:          '',
   })
   const [showPwd, setShowPwd] = useState(false)
   const set = (k, v) => setF(p => ({ ...p, [k]: v }))
@@ -361,9 +362,14 @@ function AccountModal({ account, onSave, onDelete, onClose }) {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
 
-          {/* Inference toggle */}
-          <SettingRow label="Inferencia de tags" description="Sugerencias automáticas al escribir transacciones">
-            <PillToggle value={f.inference_enabled} onChange={v => set('inference_enabled', v)} />
+          {/* App tag inference toggle */}
+          <SettingRow label="Reglas del sistema" description="Sugerencias basadas en patrones globales de la app">
+            <PillToggle value={f.app_tag_inference} onChange={v => set('app_tag_inference', v)} />
+          </SettingRow>
+
+          {/* Personal tag inference toggle */}
+          <SettingRow label="Reglas personales" description="Sugerencias basadas en tus asignaciones anteriores">
+            <PillToggle value={f.personal_tag_inference} onChange={v => set('personal_tag_inference', v)} />
           </SettingRow>
 
           {/* PDF password */}

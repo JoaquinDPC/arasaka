@@ -217,6 +217,7 @@ function AddModal({ onClose, onSaved, currentSaldo, accountId, recognizedTags, u
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState(null)
   const [inferenceSuggestions, setInferenceSuggestions] = useState([])
+  const [rememberDescription, setRememberDescription] = useState(false)
   const set = useCallback((k, v) => setF(p => ({ ...p, [k]: v })), [])
   const onChangeTags = useCallback(v => setF(p => ({ ...p, tags: v })), [])
 
@@ -225,7 +226,7 @@ function AddModal({ onClose, onSaved, currentSaldo, accountId, recognizedTags, u
   useEffect(() => {
     const desc = f.description.trim()
     if (!desc) { setInferenceSuggestions([]); return }
-    if (selectedAccount?.settings?.inference_enabled === false) return
+    if (selectedAccount?.settings?.app_tag_inference === false && selectedAccount?.settings?.personal_tag_inference === false) return
     if (inferCache.has(desc)) {
       setInferenceSuggestions(inferCache.get(desc))
       return
@@ -251,16 +252,17 @@ function AddModal({ onClose, onSaved, currentSaldo, accountId, recognizedTags, u
     setError(null)
     try {
       await api.createTransaction({
-        date:        f.date,
-        description: f.description.trim(),
-        tags:        f.tags.length ? f.tags : [],
-        flow:        f.flow,
-        amount:      Math.round(Math.abs(parseFloat(f.amount))),
-        notes:       f.notes || undefined,
-        custom_description: f.customDescription || undefined,
-        source:      'manual',
-        currency:    'CLP',
-        account_id:  accountId ?? undefined,
+        date:                f.date,
+        description:         f.description.trim(),
+        tags:                f.tags.length ? f.tags : [],
+        flow:                f.flow,
+        amount:              Math.round(Math.abs(parseFloat(f.amount))),
+        notes:               f.notes || undefined,
+        custom_description:  f.customDescription || undefined,
+        source:              'manual',
+        currency:            'CLP',
+        account_id:          accountId ?? undefined,
+        remember_description: f.customDescription ? rememberDescription : false,
       })
       onSaved()
     } catch {
@@ -298,6 +300,25 @@ function AddModal({ onClose, onSaved, currentSaldo, accountId, recognizedTags, u
             <div className="flbl">Subkey <span style={{ color: 'var(--text-dim)', fontWeight: 400, fontSize: 9 }}>tu alias</span></div>
             <input className="finput" placeholder="Tu código / alias" value={f.customDescription}
               onChange={e => set('customDescription', e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: 12 }} />
+            {f.customDescription && (
+              <div onClick={() => setRememberDescription(v => !v)}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginTop: 6, cursor: 'pointer', userSelect: 'none',
+                  padding: '4px 10px 4px 6px', borderRadius: 6, transition: 'all var(--t)',
+                  background: rememberDescription ? 'rgba(201,168,76,.12)' : 'var(--surface2)',
+                  border: `1px solid ${rememberDescription ? 'rgba(201,168,76,.35)' : 'var(--border)'}`,
+                }}>
+                <div style={{ width: 28, height: 16, borderRadius: 8, position: 'relative', flexShrink: 0, transition: 'background var(--t)',
+                  background: rememberDescription ? 'var(--accent)' : 'var(--border)' }}>
+                  <div style={{ position: 'absolute', top: 2, left: rememberDescription ? 14 : 2, width: 12, height: 12,
+                    borderRadius: '50%', background: rememberDescription ? '#0c0c0e' : 'var(--text-dim)',
+                    transition: 'left var(--t), background var(--t)' }} />
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.03em',
+                  color: rememberDescription ? 'var(--accent)' : 'var(--text-dim)' }}>
+                  Recordar alias
+                </span>
+              </div>
+            )}
           </div>
           <div className="ff">
             <div className="flbl">Monto CLP</div>
@@ -337,13 +358,14 @@ function EditModal({ tx, onClose, onUpdate, recognizedTags, usedTags, selectedAc
     tags:              tx.tags ?? [],
     notes:             tx.notes ?? '',
   })
+  const [rememberDescription, setRememberDescription] = useState(!tx.custom_description)
   const set = useCallback((k, v) => setF(p => ({ ...p, [k]: v })), [])
   const onChangeTags = useCallback(v => setF(p => ({ ...p, tags: v })), [])
   const color = getCatColor(tx.tags?.[0])
   const [inferenceSuggestions, setInferenceSuggestions] = useState([])
 
   useEffect(() => {
-    if (selectedAccount?.settings?.inference_enabled === false) return
+    if (selectedAccount?.settings?.app_tag_inference === false && selectedAccount?.settings?.personal_tag_inference === false) return
     const desc = tx.description
     if (inferCache.has(desc)) {
       setInferenceSuggestions(inferCache.get(desc))
@@ -359,11 +381,13 @@ function EditModal({ tx, onClose, onUpdate, recognizedTags, usedTags, selectedAc
   }, [])
 
   function save() {
+    const cd = f.customDescription.trim() || null
     const payload = {
-      date:     f.date || undefined,
-      tags:     f.tags,
-      notes:    f.notes.trim() || null,
-      custom_description: f.customDescription.trim() || null,
+      date:                f.date || undefined,
+      tags:                f.tags,
+      notes:               f.notes.trim() || null,
+      custom_description:  cd,
+      remember_description: cd ? rememberDescription : false,
     }
     onUpdate({ ...tx, ...payload })
     onClose()
@@ -399,6 +423,25 @@ function EditModal({ tx, onClose, onUpdate, recognizedTags, usedTags, selectedAc
             <div className="flbl">Subkey <span style={{ color: 'var(--text-dim)', fontWeight: 400, fontSize: 9 }}>tu alias</span></div>
             <input className="finput" placeholder="Tu código / alias" value={f.customDescription}
               onChange={e => set('customDescription', e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: 12 }} />
+            {f.customDescription && (
+              <div onClick={() => setRememberDescription(v => !v)}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginTop: 6, cursor: 'pointer', userSelect: 'none',
+                  padding: '4px 10px 4px 6px', borderRadius: 6, transition: 'all var(--t)',
+                  background: rememberDescription ? 'rgba(201,168,76,.12)' : 'var(--surface2)',
+                  border: `1px solid ${rememberDescription ? 'rgba(201,168,76,.35)' : 'var(--border)'}`,
+                }}>
+                <div style={{ width: 28, height: 16, borderRadius: 8, position: 'relative', flexShrink: 0, transition: 'background var(--t)',
+                  background: rememberDescription ? 'var(--accent)' : 'var(--border)' }}>
+                  <div style={{ position: 'absolute', top: 2, left: rememberDescription ? 14 : 2, width: 12, height: 12,
+                    borderRadius: '50%', background: rememberDescription ? '#0c0c0e' : 'var(--text-dim)',
+                    transition: 'left var(--t), background var(--t)' }} />
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.03em',
+                  color: rememberDescription ? 'var(--accent)' : 'var(--text-dim)' }}>
+                  Recordar alias
+                </span>
+              </div>
+            )}
           </div>
           <div className="ff full">
             <div className="flbl">Tags / Categorías</div>
@@ -604,11 +647,16 @@ export default function Ledger() {
   const [searchParams] = useSearchParams()
   const { selectedId, selectedAccount, syncVersion } = useAccount()
   const { recognized: recognizedTags, usedTags, personal: personalTags } = useTags()
-  // Top 15 chips: most-used first, personal tags fill remaining slots
-  const allUsedTags = useMemo(
-    () => [...usedTags, ...personalTags.filter(p => !usedTags.some(u => tagEq(u, p)))].slice(0, 15),
-    [usedTags, personalTags]
-  )
+  // Top 15 chips: most-used first, personal tags fill remaining slots, recognized tags fill the rest
+  const allUsedTags = useMemo(() => {
+    const merged = [...usedTags, ...personalTags.filter(p => !usedTags.some(u => tagEq(u, p)))]
+    if (merged.length < 15) {
+      const existing = new Set(merged.map(t => t.toLowerCase()))
+      const fill = recognizedTags.filter(r => !existing.has(r.toLowerCase()))
+      merged.push(...fill)
+    }
+    return merged.slice(0, 15)
+  }, [usedTags, personalTags, recognizedTags])
 
   const [search, setSearch]           = useState('')
   const [selectedTags, setSelectedTags] = useState(() => {
