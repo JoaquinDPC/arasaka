@@ -7,7 +7,6 @@ package domain
 type TransactionFilter struct {
 	Year      string
 	Month     string
-	Category  string
 	Flow      string
 	AccountID string
 	Tags      []string // AND filter: rows must contain all listed tags (tags @> ARRAY[...])

@@ -21,7 +21,8 @@ func NewAccountRepository(db *sql.DB) domain.AccountRepository {
 func (r *accountRepo) List(ctx context.Context, userID int64) ([]domain.Account, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
-			a.id, a.user_id, a.bank_id, a.name, a.type, a.currency, a.created_at, a.updated_at,
+			a.id, a.user_id, a.bank_id, a.name, a.type, a.currency, a.settings,
+			a.created_at, a.updated_at,
 			COALESCE(SUM(
 				CASE
 					WHEN t.flow IN ('INCOME', 'OPENING') THEN  t.amount
@@ -34,7 +35,8 @@ func (r *accountRepo) List(ctx context.Context, userID int64) ([]domain.Account,
 		FROM accounts a
 		LEFT JOIN transactions t ON t.account_id = a.id
 		WHERE a.user_id = $1
-		GROUP BY a.id, a.user_id, a.bank_id, a.name, a.type, a.currency, a.created_at, a.updated_at
+		GROUP BY a.id, a.user_id, a.bank_id, a.name, a.type, a.currency, a.settings,
+		         a.created_at, a.updated_at
 		ORDER BY a.created_at ASC
 	`, userID)
 	if err != nil {
@@ -46,7 +48,7 @@ func (r *accountRepo) List(ctx context.Context, userID int64) ([]domain.Account,
 	for rows.Next() {
 		var a domain.Account
 		if err := rows.Scan(
-			&a.ID, &a.UserID, &a.BankID, &a.Name, &a.Type, &a.Currency,
+			&a.ID, &a.UserID, &a.BankID, &a.Name, &a.Type, &a.Currency, &a.Settings,
 			&a.CreatedAt, &a.UpdatedAt,
 			&a.Balance, &a.MovementCount, &a.LastMovement,
 		); err != nil {
@@ -60,6 +62,21 @@ func (r *accountRepo) List(ctx context.Context, userID int64) ([]domain.Account,
 	return accounts, nil
 }
 
+func (r *accountRepo) GetByID(ctx context.Context, id int64, userID int64) (domain.Account, error) {
+	var a domain.Account
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, user_id, bank_id, name, type, currency, settings, created_at, updated_at
+		FROM accounts WHERE id = $1 AND user_id = $2
+	`, id, userID).Scan(
+		&a.ID, &a.UserID, &a.BankID, &a.Name, &a.Type, &a.Currency, &a.Settings,
+		&a.CreatedAt, &a.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return domain.Account{}, fmt.Errorf("not found")
+	}
+	return a, err
+}
+
 func (r *accountRepo) Create(ctx context.Context, p domain.CreateAccountParams) (domain.Account, error) {
 	if p.Currency == "" {
 		p.Currency = "CLP"
@@ -67,13 +84,18 @@ func (r *accountRepo) Create(ctx context.Context, p domain.CreateAccountParams) 
 	if p.Type == "" {
 		p.Type = "corriente"
 	}
+	sv, err := p.Settings.Value()
+	if err != nil {
+		return domain.Account{}, err
+	}
 	var a domain.Account
-	err := r.db.QueryRowContext(ctx, `
-		INSERT INTO accounts (user_id, bank_id, name, type, currency)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, user_id, bank_id, name, type, currency, created_at, updated_at
-	`, p.UserID, p.BankID, p.Name, p.Type, p.Currency).Scan(
-		&a.ID, &a.UserID, &a.BankID, &a.Name, &a.Type, &a.Currency, &a.CreatedAt, &a.UpdatedAt,
+	err = r.db.QueryRowContext(ctx, `
+		INSERT INTO accounts (user_id, bank_id, name, type, currency, settings)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, user_id, bank_id, name, type, currency, settings, created_at, updated_at
+	`, p.UserID, p.BankID, p.Name, p.Type, p.Currency, sv).Scan(
+		&a.ID, &a.UserID, &a.BankID, &a.Name, &a.Type, &a.Currency, &a.Settings,
+		&a.CreatedAt, &a.UpdatedAt,
 	)
 	return a, err
 }
@@ -100,6 +122,13 @@ func (r *accountRepo) Update(ctx context.Context, id int64, p domain.UpdateAccou
 	if p.Type != nil {
 		add("type", *p.Type)
 	}
+	if p.Settings != nil {
+		sv, err := p.Settings.Value()
+		if err != nil {
+			return domain.Account{}, err
+		}
+		add("settings", sv)
+	}
 	if set == "" {
 		return domain.Account{}, fmt.Errorf("no fields to update")
 	}
@@ -111,12 +140,12 @@ func (r *accountRepo) Update(ctx context.Context, id int64, p domain.UpdateAccou
 
 	query := fmt.Sprintf(`
 		UPDATE accounts SET %s WHERE id = $%d
-		RETURNING id, bank_id, name, type, currency, created_at, updated_at
+		RETURNING id, bank_id, name, type, currency, settings, created_at, updated_at
 	`, set, n)
 
 	var a domain.Account
 	err := r.db.QueryRowContext(ctx, query, args...).Scan(
-		&a.ID, &a.BankID, &a.Name, &a.Type, &a.Currency, &a.CreatedAt, &a.UpdatedAt,
+		&a.ID, &a.BankID, &a.Name, &a.Type, &a.Currency, &a.Settings, &a.CreatedAt, &a.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return domain.Account{}, fmt.Errorf("not found")

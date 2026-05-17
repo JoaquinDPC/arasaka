@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"arasaka/internal/crypto"
 	"arasaka/internal/domain"
 	"arasaka/internal/middleware"
 	"arasaka/internal/service"
@@ -13,11 +14,12 @@ import (
 
 // AccountController handles HTTP requests for the /accounts resource.
 type AccountController struct {
-	svc *service.AccountService
+	svc       *service.AccountService
+	masterKey []byte
 }
 
-func NewAccountController(svc *service.AccountService) *AccountController {
-	return &AccountController{svc: svc}
+func NewAccountController(svc *service.AccountService, masterKey []byte) *AccountController {
+	return &AccountController{svc: svc, masterKey: masterKey}
 }
 
 func (ctrl *AccountController) List(c *gin.Context) {
@@ -31,10 +33,15 @@ func (ctrl *AccountController) List(c *gin.Context) {
 }
 
 type createAccountReq struct {
-	BankID   domain.BankID `json:"bank_id" binding:"required"`
-	Name     string        `json:"name"    binding:"required"`
-	Type     string        `json:"type"`
-	Currency string        `json:"currency"`
+	BankID           domain.BankID `json:"bank_id"           binding:"required"`
+	Name             string        `json:"name"              binding:"required"`
+	Type             string        `json:"type"`
+	Currency         string        `json:"currency"`
+	InferenceEnabled *bool         `json:"inference_enabled"`
+	PersonalEnabled  *bool         `json:"personal_enabled"`
+	AppEnabled       *bool         `json:"app_enabled"`
+	MonthlySalary    *int64        `json:"monthly_salary"`
+	PDFPassword      string        `json:"pdf_password"`
 }
 
 func (ctrl *AccountController) Create(c *gin.Context) {
@@ -47,12 +54,36 @@ func (ctrl *AccountController) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid bank_id"})
 		return
 	}
+
+	settings := domain.AccountSettings{InferenceEnabled: true, PersonalEnabled: true, AppEnabled: true}
+	if req.InferenceEnabled != nil {
+		settings.InferenceEnabled = *req.InferenceEnabled
+	}
+	if req.PersonalEnabled != nil {
+		settings.PersonalEnabled = *req.PersonalEnabled
+	}
+	if req.AppEnabled != nil {
+		settings.AppEnabled = *req.AppEnabled
+	}
+	if req.MonthlySalary != nil {
+		settings.MonthlySalary = *req.MonthlySalary
+	}
+	if req.PDFPassword != "" {
+		enc, err := crypto.Encrypt(req.PDFPassword, ctrl.masterKey)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "encrypt password: " + err.Error()})
+			return
+		}
+		settings.PDFPassword = enc
+	}
+
 	a, err := ctrl.svc.Create(c.Request.Context(), domain.CreateAccountParams{
 		UserID:   c.GetInt64(middleware.UserIDKey),
 		BankID:   req.BankID,
 		Name:     req.Name,
 		Type:     req.Type,
 		Currency: req.Currency,
+		Settings: settings,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -62,9 +93,14 @@ func (ctrl *AccountController) Create(c *gin.Context) {
 }
 
 type updateAccountReq struct {
-	BankID *domain.BankID `json:"bank_id"`
-	Name   *string        `json:"name"`
-	Type   *string        `json:"type"`
+	BankID           *domain.BankID `json:"bank_id"`
+	Name             *string        `json:"name"`
+	Type             *string        `json:"type"`
+	InferenceEnabled *bool          `json:"inference_enabled"`
+	PersonalEnabled  *bool          `json:"personal_enabled"`
+	AppEnabled       *bool          `json:"app_enabled"`
+	MonthlySalary    *int64         `json:"monthly_salary"`
+	PDFPassword      *string        `json:"pdf_password"`
 }
 
 func (ctrl *AccountController) Update(c *gin.Context) {
@@ -82,11 +118,49 @@ func (ctrl *AccountController) Update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid bank_id"})
 		return
 	}
-	a, err := ctrl.svc.Update(c.Request.Context(), id, domain.UpdateAccountParams{
+
+	userID := c.GetInt64(middleware.UserIDKey)
+	p := domain.UpdateAccountParams{
 		BankID: req.BankID,
-		Name:     req.Name,
-		Type:     req.Type,
-	})
+		Name:   req.Name,
+		Type:   req.Type,
+	}
+
+	// Build settings update by reading existing and overlaying request changes.
+	hasSettingsChange := req.InferenceEnabled != nil || req.PersonalEnabled != nil ||
+		req.AppEnabled != nil || req.MonthlySalary != nil ||
+		(req.PDFPassword != nil && *req.PDFPassword != "")
+	if hasSettingsChange {
+		existing, err := ctrl.svc.GetByID(c.Request.Context(), id, userID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		settings := existing.Settings
+		if req.InferenceEnabled != nil {
+			settings.InferenceEnabled = *req.InferenceEnabled
+		}
+		if req.PersonalEnabled != nil {
+			settings.PersonalEnabled = *req.PersonalEnabled
+		}
+		if req.AppEnabled != nil {
+			settings.AppEnabled = *req.AppEnabled
+		}
+		if req.MonthlySalary != nil {
+			settings.MonthlySalary = *req.MonthlySalary
+		}
+		if req.PDFPassword != nil && *req.PDFPassword != "" {
+			enc, err := crypto.Encrypt(*req.PDFPassword, ctrl.masterKey)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "encrypt password: " + err.Error()})
+				return
+			}
+			settings.PDFPassword = enc
+		}
+		p.Settings = &settings
+	}
+
+	a, err := ctrl.svc.Update(c.Request.Context(), id, p)
 	if err != nil {
 		if err.Error() == "not found" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})

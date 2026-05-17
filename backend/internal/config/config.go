@@ -11,10 +11,12 @@ type Config struct {
 	DatabaseURL        string `yaml:"database_url"`
 	ServerPort         string `yaml:"server_port"`
 	JWTSecret          string `yaml:"jwt_secret"`
+	MasterKey          string `yaml:"master_key"`
 	BancochileUser     string `yaml:"bancochile_user"`
 	BancochilePassword string `yaml:"bancochile_password"`
 	SantanderUser      string `yaml:"santander_user"`
 	SantanderPassword  string `yaml:"santander_password"`
+	DevBypassAuth      bool   `yaml:"dev_bypass_auth"`
 }
 
 // Load parses the YAML file at path and returns the validated config.

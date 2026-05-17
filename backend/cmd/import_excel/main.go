@@ -120,29 +120,6 @@ func main() {
 			category = strings.TrimSpace(row[2])
 		}
 
-		var subtype *string
-		if len(row) > 4 {
-			if s := strings.TrimSpace(row[4]); s != "" {
-				subtype = &s
-			}
-		}
-
-		var asset *string
-		if len(row) > 5 {
-			if a := strings.TrimSpace(row[5]); a != "" {
-				asset = &a
-			}
-		}
-
-		var quantity *float64
-		if len(row) > 6 {
-			if q := strings.TrimSpace(row[6]); q != "" {
-				if qf, err := strconv.ParseFloat(q, 64); err == nil {
-					quantity = &qf
-				}
-			}
-		}
-
 		var notes *string
 		if len(row) > 8 {
 			if n := strings.TrimSpace(row[8]); n != "" {
@@ -155,11 +132,7 @@ func main() {
 		params = append(params, domain.CreateTransactionParams{
 			Date:        date,
 			Description: description,
-			Category:    category,
 			Flow:        flow,
-			Subtype:     subtype,
-			Asset:       asset,
-			Quantity:    quantity,
 			Amount:      amount,
 			Notes:       notes,
 			Source:      "excel_import",

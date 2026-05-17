@@ -111,10 +111,11 @@ func (s *SyncService) syncBank(ctx context.Context, bankID, user, password strin
 
 	var accountID *int64
 	var userID *int64
+	var accountSettings domain.AccountSettings
 	var acctID int64
 	var nullUID sql.NullInt64
-	row := s.db.QueryRowContext(ctx, `SELECT id, user_id FROM accounts WHERE bank_id = $1 LIMIT 1`, dbBankID)
-	if err := row.Scan(&acctID, &nullUID); err == nil {
+	row := s.db.QueryRowContext(ctx, `SELECT id, user_id, settings FROM accounts WHERE bank_id = $1 LIMIT 1`, dbBankID)
+	if err := row.Scan(&acctID, &nullUID, &accountSettings); err == nil {
 		accountID = &acctID
 		if nullUID.Valid {
 			userID = &nullUID.Int64
@@ -135,7 +136,7 @@ func (s *SyncService) syncBank(ctx context.Context, bankID, user, password strin
 		}
 	}
 
-	result, err := importer.Run(ctx, s.db, all, fromDate, accountID, userID, s.inferenceSvc, dbBankID, s.logger)
+	result, err := importer.Run(ctx, s.db, all, fromDate, accountID, userID, s.inferenceSvc, accountSettings, dbBankID, s.logger)
 
 	// Retroactively link corriente movements that were imported before the account
 	// existed in the database (account_id IS NULL). Uses all fetched movements —

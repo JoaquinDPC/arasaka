@@ -12,12 +12,12 @@ type UserRepository interface {
 	GetByEmail(ctx context.Context, email string) (User, error)
 	GetByID(ctx context.Context, id int64) (User, error)
 	Create(ctx context.Context, email, passwordHash string) (User, error)
-	UpdateSettings(ctx context.Context, userID int64, s UserSettings) error
 }
 
 // AccountRepository is the port for account persistence.
 type AccountRepository interface {
 	List(ctx context.Context, userID int64) ([]Account, error)
+	GetByID(ctx context.Context, id int64, userID int64) (Account, error)
 	Create(ctx context.Context, p CreateAccountParams) (Account, error)
 	Update(ctx context.Context, id int64, p UpdateAccountParams) (Account, error)
 	Delete(ctx context.Context, id int64) error
@@ -36,15 +36,6 @@ type TransactionRepository interface {
 	// TagSpending returns per-tag expense totals for the given user and period.
 	// month=0 means full year. accountID=nil means all accounts.
 	TagSpending(ctx context.Context, userID int64, year, month int, accountID *int64) ([]TagSummary, error)
-}
-
-// BudgetRepository is the port for budget persistence.
-type BudgetRepository interface {
-	List(ctx context.Context, userID int64, year string) ([]Budget, error)
-	Upsert(ctx context.Context, b Budget) (Budget, error)
-	UpsertBatch(ctx context.Context, budgets []Budget) error
-	BudgetForCategory(ctx context.Context, userID int64, category string, year, month int) (int64, error)
-	ListCategories(ctx context.Context) ([]string, error)
 }
 
 // UserTagRepository is the port for user-defined tag persistence.
@@ -80,11 +71,11 @@ type AppTagRuleRepository interface {
 	MatchDescription(ctx context.Context, normalizedDesc string) ([]AppTagRule, error)
 }
 
-// UserTagHistoryRepository is the port for behavioral tag and key_user learning per user.
+// UserTagHistoryRepository is the port for behavioral tag and custom_description learning per user.
 type UserTagHistoryRepository interface {
-	// Upsert records or updates a description-to-tag and description-to-key_user mapping, incrementing use_count.
-	// keyUser nil leaves any existing key_user value unchanged.
-	Upsert(ctx context.Context, userID int64, descriptionKey string, tags []string, keyUser *string) error
+	// Upsert records or updates a description-to-tag and description-to-custom_description mapping, incrementing use_count.
+	// customDescription nil leaves any existing custom_description value unchanged.
+	Upsert(ctx context.Context, userID int64, descriptionKey string, tags []string, customDescription *string) error
 	// Match returns the history entry for an exact description_key, or nil if not found.
 	Match(ctx context.Context, userID int64, descriptionKey string) (*UserTagHistory, error)
 }
@@ -93,15 +84,14 @@ type UserTagHistoryRepository interface {
 // accountID filters results to a single account when non-nil; nil means all accounts.
 type ReportRepository interface {
 	MonthlyTotals(ctx context.Context, year, month int, accountID *int64) (income, expenses, investments int64, err error)
-	CategoryTotals(ctx context.Context, year, month int, accountID *int64) ([]CategorySummary, error)
-	SubtypeTotals(ctx context.Context, year, month int, accountID *int64) (map[string]int64, error)
+	// TagTotals returns expense totals grouped by tag for a given month, joined with tag_budgets.
+	TagTotals(ctx context.Context, year, month int, accountID *int64) ([]CategorySummary, error)
 	TopExpenses(ctx context.Context, year, month, limit int, accountID *int64) ([]Transaction, error)
-	YearlyKPIs(ctx context.Context, year int, accountID *int64) (opening, income, expenses, investments, fixed int64, err error)
+	YearlyKPIs(ctx context.Context, year int, accountID *int64) (opening, income, expenses, investments int64, err error)
 	MonthlyTrend(ctx context.Context, year int, accountID *int64) ([]MonthlyReport, error)
-	BudgetVsActual(ctx context.Context, year, month int, accountID *int64) ([]CategorySummary, error)
 	MonthlyHistory(ctx context.Context, year, beforeMonth int, accountID *int64) ([]MonthlyReport, error)
-	YearlyCategoryTotals(ctx context.Context, year int, accountID *int64) ([]CategorySummary, error)
+	YearlyTagTotals(ctx context.Context, year int, accountID *int64) ([]CategorySummary, error)
 	YearlyTopExpenses(ctx context.Context, year, limit int, accountID *int64) ([]Transaction, error)
-	AllTimeCategoryTotals(ctx context.Context, accountID *int64) ([]CategorySummary, error)
+	AllTimeTagTotals(ctx context.Context, accountID *int64) ([]CategorySummary, error)
 	ActiveInstallments(ctx context.Context) ([]CreditCardItem, error)
 }

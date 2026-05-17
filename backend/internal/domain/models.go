@@ -12,16 +12,17 @@ import (
 // For write params see commands.go, for filters see queries.go,
 // for aggregated read results see reports.go.
 
-// UserSettings holds per-user feature toggles stored as JSONB on the users table.
-type UserSettings struct {
-	InferenceEnabled bool  `json:"inference_enabled"`
-	PersonalEnabled  bool  `json:"personal_enabled"`
-	AppEnabled       bool  `json:"app_enabled"`
-	MonthlySalary    int64 `json:"monthly_salary,omitempty"`
+// AccountSettings holds per-account configuration stored as JSONB on the accounts table.
+type AccountSettings struct {
+	InferenceEnabled bool   `json:"inference_enabled"`
+	PersonalEnabled  bool   `json:"personal_enabled"`
+	AppEnabled       bool   `json:"app_enabled"`
+	MonthlySalary    int64  `json:"monthly_salary,omitempty"`
+	PDFPassword      string `json:"pdf_password,omitempty"`
 }
 
-// Scan implements sql.Scanner for PostgreSQL JSONB → UserSettings.
-func (s *UserSettings) Scan(src any) error {
+// Scan implements sql.Scanner for PostgreSQL JSONB → AccountSettings.
+func (s *AccountSettings) Scan(src any) error {
 	var b []byte
 	switch v := src.(type) {
 	case []byte:
@@ -29,79 +30,64 @@ func (s *UserSettings) Scan(src any) error {
 	case string:
 		b = []byte(v)
 	case nil:
-		*s = UserSettings{InferenceEnabled: true, PersonalEnabled: true, AppEnabled: true}
+		*s = AccountSettings{InferenceEnabled: true, PersonalEnabled: true, AppEnabled: true}
 		return nil
 	default:
-		return fmt.Errorf("cannot scan %T into UserSettings", src)
+		return fmt.Errorf("cannot scan %T into AccountSettings", src)
 	}
 	return json.Unmarshal(b, s)
 }
 
-// Value implements driver.Valuer for UserSettings → PostgreSQL JSONB.
-func (s UserSettings) Value() (driver.Value, error) {
+// Value implements driver.Valuer for AccountSettings → PostgreSQL JSONB.
+func (s AccountSettings) Value() (driver.Value, error) {
 	b, err := json.Marshal(s)
 	return string(b), err
 }
 
 // User is an authenticated principal that owns one or more accounts.
 type User struct {
-	ID           int64        `json:"id"         db:"id"`
-	Email        string       `json:"email"      db:"email"`
-	PasswordHash string       `json:"-"          db:"password_hash"`
-	Settings     UserSettings `json:"settings"   db:"settings"`
-	CreatedAt    time.Time    `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time    `json:"updated_at" db:"updated_at"`
+	ID           int64     `json:"id"         db:"id"`
+	Email        string    `json:"email"      db:"email"`
+	PasswordHash string    `json:"-"          db:"password_hash"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
 }
 
 // Account represents a bank account.
 type Account struct {
-	ID            int64      `json:"id"             db:"id"`
-	UserID        int64      `json:"user_id"        db:"user_id"`
-	BankID        BankID     `json:"bank_id"        db:"bank_id"`
-	Name          string     `json:"name"           db:"name"`
-	Type          string     `json:"type"           db:"type"`
-	Currency      string     `json:"currency"       db:"currency"`
-	Balance       int64      `json:"balance"`
-	MovementCount int        `json:"movement_count"`
-	LastMovement  *time.Time `json:"last_movement"`
-	CreatedAt     time.Time  `json:"created_at"     db:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"     db:"updated_at"`
+	ID            int64           `json:"id"             db:"id"`
+	UserID        int64           `json:"user_id"        db:"user_id"`
+	BankID        BankID          `json:"bank_id"        db:"bank_id"`
+	Name          string          `json:"name"           db:"name"`
+	Type          string          `json:"type"           db:"type"`
+	Currency      string          `json:"currency"       db:"currency"`
+	Settings      AccountSettings `json:"settings"       db:"settings"`
+	Balance       int64           `json:"balance"`
+	MovementCount int             `json:"movement_count"`
+	LastMovement  *time.Time      `json:"last_movement"`
+	CreatedAt     time.Time       `json:"created_at"     db:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at"     db:"updated_at"`
 }
 
 // Transaction is the core financial record.
 // Amount is always positive; direction encoded in Flow.
 type Transaction struct {
-	ID             int64     `json:"id"                        db:"id"`
-	Date           time.Time `json:"date"                      db:"date"`
-	Description    string    `json:"description"               db:"description"`
-	Category       string    `json:"category"                  db:"category"`
-	Flow           string    `json:"flow"                      db:"flow"`
-	Subtype        *string   `json:"subtype,omitempty"         db:"subtype"`
-	Asset          *string   `json:"asset,omitempty"           db:"asset"`
-	KeyUser        *string   `json:"key_user,omitempty"        db:"key_user"`
-	Quantity       *float64  `json:"quantity,omitempty"        db:"quantity"`
-	Amount         int64     `json:"amount"                    db:"amount"`
-	Notes          *string   `json:"notes,omitempty"           db:"notes"`
-	Source         string    `json:"source"                    db:"source"`
-	BankRawID      *string   `json:"-"                         db:"bank_raw_id"`
-	Currency       string    `json:"currency"                  db:"currency"`
-	CCStatementID  *int64    `json:"cc_statement_id,omitempty" db:"cc_statement_id"`
-	AccountID      *int64    `json:"account_id,omitempty"      db:"account_id"`
-	Tags           []string  `json:"tags"                      db:"tags"`
-	RunningBalance *int64    `json:"running_balance,omitempty" db:"running_balance"`
-	CreatedAt      time.Time `json:"created_at"                db:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"                db:"updated_at"`
-	UserID         *int64    `json:"user_id,omitempty"         db:"user_id"`
-}
-
-type Budget struct {
-	ID        int64  `json:"id"                   db:"id"`
-	UserID    int64  `json:"user_id"              db:"user_id"`
-	Category  string `json:"category"             db:"category"`
-	Year      int    `json:"year"                 db:"year"`
-	Month     int    `json:"month"                db:"month"`
-	Amount    int64  `json:"amount"               db:"amount"`
-	AccountID *int64 `json:"account_id,omitempty" db:"account_id"`
+	ID                int64     `json:"id"                           db:"id"`
+	Date              time.Time `json:"date"                         db:"date"`
+	Description       string    `json:"description"                  db:"description"`
+	Flow              string    `json:"flow"                         db:"flow"`
+	CustomDescription *string   `json:"custom_description,omitempty" db:"custom_description"`
+	Amount            int64     `json:"amount"                       db:"amount"`
+	Notes             *string   `json:"notes,omitempty"              db:"notes"`
+	Source            string    `json:"source"                       db:"source"`
+	BankRawID         *string   `json:"-"                            db:"bank_raw_id"`
+	Currency          string    `json:"currency"                     db:"currency"`
+	CCStatementID     *int64    `json:"cc_statement_id,omitempty"    db:"cc_statement_id"`
+	AccountID         *int64    `json:"account_id,omitempty"         db:"account_id"`
+	Tags              []string  `json:"tags"                         db:"tags"`
+	CreatedAt         time.Time `json:"created_at"                   db:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"                   db:"updated_at"`
+	UserID            *int64    `json:"user_id,omitempty"            db:"user_id"`
 }
 
 // TagBudget is a spending limit set by the user for a specific tag.
@@ -161,13 +147,13 @@ type AppTagRule struct {
 	MatchType string   `json:"match_type" db:"match_type"`
 }
 
-// UserTagHistory records a user's description-to-tag and description-to-key_user assignments learned from explicit edits.
+// UserTagHistory records a user's description-to-tag and description-to-custom_description assignments learned from explicit edits.
 type UserTagHistory struct {
-	ID             int64     `json:"id"              db:"id"`
-	UserID         int64     `json:"user_id"         db:"user_id"`
-	DescriptionKey string    `json:"description_key" db:"description_key"`
-	Tags           []string  `json:"tags"            db:"tags"`
-	KeyUser        *string   `json:"key_user"        db:"key_user"`
-	UseCount       int       `json:"use_count"       db:"use_count"`
-	LastUsedAt     time.Time `json:"last_used_at"    db:"last_used_at"`
+	ID                int64     `json:"id"                 db:"id"`
+	UserID            int64     `json:"user_id"            db:"user_id"`
+	DescriptionKey    string    `json:"description_key"    db:"description_key"`
+	Tags              []string  `json:"tags"               db:"tags"`
+	CustomDescription *string   `json:"custom_description" db:"custom_description"`
+	UseCount          int       `json:"use_count"          db:"use_count"`
+	LastUsedAt        time.Time `json:"last_used_at"       db:"last_used_at"`
 }

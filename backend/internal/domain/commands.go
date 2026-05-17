@@ -12,47 +12,41 @@ type CreateAccountParams struct {
 	Name     string
 	Type     string
 	Currency string
+	Settings AccountSettings
 }
 
 type UpdateAccountParams struct {
-	BankID *BankID
-	Name   *string
-	Type   *string
+	BankID   *BankID
+	Name     *string
+	Type     *string
+	Settings *AccountSettings
 }
 
 // CreateTransactionParams carries the data needed to create a new transaction.
 type CreateTransactionParams struct {
-	Date        time.Time
-	Description string
-	Category    string
-	Flow        string
-	Subtype     *string
-	Asset       *string
-	KeyUser     *string
-	Quantity    *float64
-	Amount      int64
-	Notes       *string
-	Source      string
-	BankRawID   *string
-	Currency    string   // defaults to "CLP" when empty
-	AccountID   *int64
-	Tags        []string // hashtag labels, e.g. ["#streaming", "#annual"]
-	UserID      *int64
+	Date              time.Time
+	Description       string
+	Flow              string
+	CustomDescription *string
+	Amount            int64
+	Notes             *string
+	Source            string
+	BankRawID         *string
+	Currency          string   // defaults to "CLP" when empty
+	AccountID         *int64
+	Tags              []string // hashtag labels, e.g. ["#streaming", "#annual"]
+	UserID            *int64
 }
 
 // UpdateTransactionParams carries the optional fields for a partial update.
 type UpdateTransactionParams struct {
-	Date        *time.Time
-	Description *string
-	Category    *string
-	Flow        *string
-	Subtype     *string
-	Asset       *string
-	KeyUser     *string
-	Quantity    *float64
-	Amount      *int64
-	Notes       *string
-	Tags        *[]string
+	Date              *time.Time
+	Description       *string
+	Flow              *string
+	CustomDescription *string
+	Amount            *int64
+	Notes             *string
+	Tags              *[]string
 }
 
 type CreateCCStatementParams struct {

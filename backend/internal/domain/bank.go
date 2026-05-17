@@ -19,30 +19,32 @@ func (b BankID) Valid() bool {
 const (
 	BankBancoDeChile BankID = "banco_de_chile"
 	BankSantander    BankID = "santander"
-	BankBCI          BankID = "bci"
-	BankBancoEstado  BankID = "banco_estado"
-	BankScotiabank   BankID = "scotiabank"
-	BankItau         BankID = "itau"
-	BankBICE         BankID = "bice"
-	BankFalabella    BankID = "falabella"
-	BankRipley       BankID = "ripley"
-	BankMercadoPago  BankID = "mercado_pago"
-	BankOther        BankID = "otro"
+
+	// TODO: Add support for these banks
+	// BankBCI          BankID = "bci"
+	// BankBancoEstado  BankID = "banco_estado"
+	// BankScotiabank   BankID = "scotiabank"
+	// BankItau         BankID = "itau"
+	// BankBICE         BankID = "bice"
+	// BankFalabella    BankID = "falabella"
+	// BankRipley       BankID = "ripley"
+	// BankMercadoPago  BankID = "mercado_pago"
+	// BankOther        BankID = "otro"
 )
 
 // ValidBankIDs is the authoritative list of accepted bank_id values.
 var ValidBankIDs = []BankID{
 	BankBancoDeChile,
 	BankSantander,
-	BankBCI,
-	BankBancoEstado,
-	BankScotiabank,
-	BankItau,
-	BankBICE,
-	BankFalabella,
-	BankRipley,
-	BankMercadoPago,
-	BankOther,
+	// BankBCI,
+	// BankBancoEstado,
+	// BankScotiabank,
+	// BankItau,
+	// BankBICE,
+	// BankFalabella,
+	// BankRipley,
+	// BankMercadoPago,
+	// BankOther,
 }
 
 // BankLabel returns the human-readable display name for a bank_id.
@@ -52,22 +54,22 @@ func BankLabel(bankID BankID) string {
 		return "Banco de Chile"
 	case BankSantander:
 		return "Santander"
-	case BankBCI:
-		return "BCI"
-	case BankBancoEstado:
-		return "BancoEstado"
-	case BankScotiabank:
-		return "Scotiabank"
-	case BankItau:
-		return "Itaú"
-	case BankBICE:
-		return "BICE"
-	case BankFalabella:
-		return "Falabella"
-	case BankRipley:
-		return "Ripley"
-	case BankMercadoPago:
-		return "Mercado Pago"
+	// case BankBCI:
+	// 	return "BCI"
+	// case BankBancoEstado:
+	// 	return "BancoEstado"
+	// case BankScotiabank:
+	// 	return "Scotiabank"
+	// case BankItau:
+	// 	return "Itaú"
+	// case BankBICE:
+	// 	return "BICE"
+	// case BankFalabella:
+	// 	return "Falabella"
+	// case BankRipley:
+	// 	return "Ripley"
+	// case BankMercadoPago:
+	// 	return "Mercado Pago"
 	default:
 		return string(bankID)
 	}

@@ -60,9 +60,10 @@ func (s *ImportService) ImportPDFs(ctx context.Context, userID, accountID int64,
 	// ── Ownership check (user-scoped) ─────────────────────────────────────────
 	var bankID domain.BankID
 	var dbUserID sql.NullInt64
+	var accountSettings domain.AccountSettings
 	row := s.db.QueryRowContext(ctx,
-		`SELECT bank_id, user_id FROM accounts WHERE id = $1`, accountID)
-	if err := row.Scan(&bankID, &dbUserID); err == sql.ErrNoRows {
+		`SELECT bank_id, user_id, settings FROM accounts WHERE id = $1`, accountID)
+	if err := row.Scan(&bankID, &dbUserID, &accountSettings); err == sql.ErrNoRows {
 		return BatchResult{}, fmt.Errorf("forbidden")
 	} else if err != nil {
 		return BatchResult{}, fmt.Errorf("account lookup: %w", err)
@@ -80,7 +81,7 @@ func (s *ImportService) ImportPDFs(ctx context.Context, userID, accountID int64,
 	result := BatchResult{AccountID: accountID, BankID: bankID}
 
 	for _, f := range files {
-		fr := s.importOne(ctx, txRepo, userID, accountID, bankID, f)
+		fr := s.importOne(ctx, txRepo, userID, accountID, bankID, accountSettings, f)
 		result.Files = append(result.Files, fr)
 		result.TotalImported += fr.Imported
 		result.TotalDuplicates += fr.Duplicates
@@ -96,6 +97,7 @@ func (s *ImportService) importOne(
 	txRepo domain.TransactionRepository,
 	userID, accountID int64,
 	bankID domain.BankID,
+	accountSettings domain.AccountSettings,
 	f NamedPDF,
 ) FileResult {
 	fr := FileResult{Filename: f.Filename}
@@ -120,7 +122,6 @@ func (s *ImportService) importOne(
 		params = append(params, domain.CreateTransactionParams{
 			Date:        row.Date,
 			Description: row.Description,
-			Category:    "NAN",
 			Flow:        row.Flow,
 			Amount:      row.Amount,
 			Currency:    "CLP",
@@ -133,7 +134,7 @@ func (s *ImportService) importOne(
 
 	// ── Apply app-level tag inference before insert ───────────────────────────
 	if s.inferenceSvc != nil {
-		params = s.inferenceSvc.AutoTagBatch(ctx, userID, params)
+		params = s.inferenceSvc.AutoTagBatch(ctx, userID, accountSettings, params)
 	}
 
 	// ── Insert (dedup-safe via ON CONFLICT transactions_dedup) ────────────────

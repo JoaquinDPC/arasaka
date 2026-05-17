@@ -2,6 +2,7 @@
 database_url: "postgres://arasaka-user:arasaka-pass@localhost:5432/arasaka?sslmode=disable"
 server_port: "8080"
 jwt_secret: "change-me-in-production"
+master_key: ""  # 64-char hex string for PDF password encryption — generate with: openssl rand -hex 32
 bancochile_user: "12345678-9"
 bancochile_password: "your_password"
 santander_user: "12345678-9"

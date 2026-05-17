@@ -20,27 +20,28 @@ func normalizeDescription(s string) string {
 
 // TagInferenceService provides two-level tag suggestions and batch auto-tagging.
 type TagInferenceService struct {
-	appRules domain.AppTagRuleRepository
-	history  domain.UserTagHistoryRepository
-	userRepo domain.UserRepository
+	appRules    domain.AppTagRuleRepository
+	history     domain.UserTagHistoryRepository
+	accountRepo domain.AccountRepository
 }
 
 func NewTagInferenceService(
 	appRules domain.AppTagRuleRepository,
 	history domain.UserTagHistoryRepository,
-	userRepo domain.UserRepository,
+	accountRepo domain.AccountRepository,
 ) *TagInferenceService {
-	return &TagInferenceService{appRules: appRules, history: history, userRepo: userRepo}
+	return &TagInferenceService{appRules: appRules, history: history, accountRepo: accountRepo}
 }
 
-// InferTags returns tag and key_user suggestions for a description at both personal and app levels.
-// Returns an empty result when inference is disabled for the user.
-func (s *TagInferenceService) InferTags(ctx context.Context, userID int64, description string) (domain.InferTagsResult, error) {
-	user, err := s.userRepo.GetByID(ctx, userID)
+// InferTags returns tag and custom_description suggestions for a description.
+// accountID scopes the inference settings to the target account.
+// Returns an empty result when inference is disabled for the account.
+func (s *TagInferenceService) InferTags(ctx context.Context, userID, accountID int64, description string) (domain.InferTagsResult, error) {
+	account, err := s.accountRepo.GetByID(ctx, accountID, userID)
 	if err != nil {
 		return domain.InferTagsResult{Description: description}, nil
 	}
-	settings := user.Settings
+	settings := account.Settings
 
 	if !settings.InferenceEnabled {
 		return domain.InferTagsResult{Description: description, Suggestions: []domain.TagSuggestion{}}, nil
@@ -49,7 +50,7 @@ func (s *TagInferenceService) InferTags(ctx context.Context, userID int64, descr
 	key := normalizeDescription(description)
 	seen := make(map[string]struct{})
 	var suggestions []domain.TagSuggestion
-	var keyUser *string
+	var customDescription *string
 
 	if settings.PersonalEnabled {
 		entry, err := s.history.Match(ctx, userID, key)
@@ -60,7 +61,7 @@ func (s *TagInferenceService) InferTags(ctx context.Context, userID int64, descr
 					suggestions = append(suggestions, domain.TagSuggestion{Tag: tag, Source: "personal"})
 				}
 			}
-			keyUser = entry.KeyUser
+			customDescription = entry.CustomDescription
 		}
 	}
 
@@ -81,30 +82,28 @@ func (s *TagInferenceService) InferTags(ctx context.Context, userID int64, descr
 	if suggestions == nil {
 		suggestions = []domain.TagSuggestion{}
 	}
-	return domain.InferTagsResult{Description: description, Suggestions: suggestions, KeyUser: keyUser}, nil
+	return domain.InferTagsResult{Description: description, Suggestions: suggestions, CustomDescription: customDescription}, nil
 }
 
-// RecordTagAssignment learns from an explicit manual tag or key_user assignment.
-// Records when source is "manual" and either tags are non-empty or keyUser is non-nil.
-func (s *TagInferenceService) RecordTagAssignment(ctx context.Context, userID int64, description string, tags []string, keyUser *string, source string) {
+// RecordTagAssignment learns from an explicit manual tag or custom_description assignment.
+// Records when source is "manual" and either tags are non-empty or customDescription is non-nil.
+func (s *TagInferenceService) RecordTagAssignment(ctx context.Context, userID int64, description string, tags []string, customDescription *string, source string) {
 	if source != "manual" {
 		return
 	}
-	if len(tags) == 0 && keyUser == nil {
+	if len(tags) == 0 && customDescription == nil {
 		return
 	}
 	key := normalizeDescription(description)
-	_ = s.history.Upsert(ctx, userID, key, tags, keyUser)
+	_ = s.history.Upsert(ctx, userID, key, tags, customDescription)
 }
 
-// AutoTagBatch applies app-level rules to untagged params and personal history for key_user in a batch import.
-// Respects the user's inference settings.
-func (s *TagInferenceService) AutoTagBatch(ctx context.Context, userID int64, params []domain.CreateTransactionParams) []domain.CreateTransactionParams {
-	user, err := s.userRepo.GetByID(ctx, userID)
-	if err != nil || !user.Settings.InferenceEnabled {
+// AutoTagBatch applies inference rules to untagged params using the provided account settings.
+// settings comes from the caller (import pipeline) which already has the account.
+func (s *TagInferenceService) AutoTagBatch(ctx context.Context, userID int64, settings domain.AccountSettings, params []domain.CreateTransactionParams) []domain.CreateTransactionParams {
+	if !settings.InferenceEnabled {
 		return params
 	}
-	settings := user.Settings
 
 	result := make([]domain.CreateTransactionParams, len(params))
 	copy(result, params)
@@ -138,8 +137,8 @@ func (s *TagInferenceService) AutoTagBatch(ctx context.Context, userID int64, pa
 			}
 		}
 
-		if p.KeyUser == nil && historyEntry != nil && historyEntry.KeyUser != nil {
-			result[i].KeyUser = historyEntry.KeyUser
+		if p.CustomDescription == nil && historyEntry != nil && historyEntry.CustomDescription != nil {
+			result[i].CustomDescription = historyEntry.CustomDescription
 		}
 	}
 	return result

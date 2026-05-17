@@ -7,15 +7,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"arasaka/internal/crypto"
 	"arasaka/internal/service"
 )
 
 type CreditCardController struct {
-	svc *service.CreditCardService
+	svc        *service.CreditCardService
+	accountSvc *service.AccountService
+	masterKey  []byte
 }
 
-func NewCreditCardController(svc *service.CreditCardService) *CreditCardController {
-	return &CreditCardController{svc: svc}
+func NewCreditCardController(svc *service.CreditCardService, accountSvc *service.AccountService, masterKey []byte) *CreditCardController {
+	return &CreditCardController{svc: svc, accountSvc: accountSvc, masterKey: masterKey}
 }
 
 func (ctrl *CreditCardController) ListStatements(c *gin.Context) {
@@ -67,6 +70,21 @@ func (ctrl *CreditCardController) ImportPDF(c *gin.Context) {
 
 	password := c.PostForm("password")
 	userID := userIDFromContext(c)
+
+	// If no password supplied but an account_id is provided, try the stored password.
+	if password == "" {
+		if aidStr := c.PostForm("account_id"); aidStr != "" {
+			if aid, err := strconv.ParseInt(aidStr, 10, 64); err == nil {
+				if acct, err := ctrl.accountSvc.GetByID(c.Request.Context(), aid, userID); err == nil {
+					if acct.Settings.PDFPassword != "" {
+						if plain, err := crypto.Decrypt(acct.Settings.PDFPassword, ctrl.masterKey); err == nil {
+							password = plain
+						}
+					}
+				}
+			}
+		}
+	}
 
 	imported, duplicates, err := ctrl.svc.ImportPDF(c.Request.Context(), userID, data, password)
 	if err != nil {

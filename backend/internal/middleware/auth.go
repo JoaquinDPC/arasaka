@@ -12,7 +12,15 @@ import (
 const UserIDKey = "user_id"
 
 // Auth validates the Bearer token in the Authorization header and sets user_id in the context.
-func Auth(jwtSecret string) gin.HandlerFunc {
+// When devBypass is true, auth is skipped and user_id is set to 1 (local dev only).
+func Auth(jwtSecret string, devBypass bool) gin.HandlerFunc {
+	if devBypass {
+		return func(c *gin.Context) {
+			c.Set(UserIDKey, int64(1))
+			c.Next()
+		}
+	}
+
 	secret := []byte(jwtSecret)
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")

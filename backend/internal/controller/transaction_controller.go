@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -27,7 +28,6 @@ func NewTransactionController(svc *service.TransactionService) *TransactionContr
 // @Produce      json
 // @Param        year      query   string  false  "Filter by year (e.g. 2026)"
 // @Param        month     query   string  false  "Filter by month (1-12)"
-// @Param        category  query   string  false  "Filter by category"
 // @Param        flow      query   string  false  "Filter by flow (income|expense|investment)"
 // @Success      200  {array}   domain.Transaction
 // @Failure      500  {object}  map[string]string
@@ -45,7 +45,6 @@ func (ctrl *TransactionController) List(c *gin.Context) {
 	f := domain.TransactionFilter{
 		Year:      c.Query("year"),
 		Month:     c.Query("month"),
-		Category:  c.Query("category"),
 		Flow:      c.Query("flow"),
 		AccountID: c.Query("account_id"),
 		Tags:      tags,
@@ -60,17 +59,14 @@ func (ctrl *TransactionController) List(c *gin.Context) {
 }
 
 type createTransactionReq struct {
-	Date        string   `json:"date"        binding:"required"`
-	Description string   `json:"description" binding:"required"`
-	Flow        string   `json:"flow"        binding:"required"`
-	Subtype     *string  `json:"subtype"`
-	Asset       *string  `json:"asset"`
-	KeyUser     *string  `json:"key_user"`
-	Quantity    *float64 `json:"quantity"`
-	Amount      int64    `json:"amount"      binding:"required,min=0"`
-	Notes       *string  `json:"notes"`
-	AccountID   *int64   `json:"account_id"`
-	Tags        []string `json:"tags"`
+	Date              string   `json:"date"               binding:"required"`
+	Description       string   `json:"description"        binding:"required"`
+	Flow              string   `json:"flow"               binding:"required"`
+	CustomDescription *string  `json:"custom_description"`
+	Amount            int64    `json:"amount"             binding:"required,min=0"`
+	Notes             *string  `json:"notes"`
+	AccountID         *int64   `json:"account_id"`
+	Tags              []string `json:"tags"`
 }
 
 // Create godoc
@@ -98,19 +94,16 @@ func (ctrl *TransactionController) Create(c *gin.Context) {
 
 	userID := userIDFromContext(c)
 	t, err := ctrl.svc.Create(c.Request.Context(), domain.CreateTransactionParams{
-		Date:        date,
-		Description: req.Description,
-		Flow:        req.Flow,
-		Subtype:     req.Subtype,
-		Asset:       req.Asset,
-		KeyUser:     req.KeyUser,
-		Quantity:    req.Quantity,
-		Amount:      req.Amount,
-		Notes:       req.Notes,
-		Source:      "manual",
-		AccountID:   req.AccountID,
-		Tags:        req.Tags,
-		UserID:      &userID,
+		Date:              date,
+		Description:       req.Description,
+		Flow:              req.Flow,
+		CustomDescription: req.CustomDescription,
+		Amount:            req.Amount,
+		Notes:             req.Notes,
+		Source:            "manual",
+		AccountID:         req.AccountID,
+		Tags:              req.Tags,
+		UserID:            &userID,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -120,16 +113,13 @@ func (ctrl *TransactionController) Create(c *gin.Context) {
 }
 
 type updateTransactionReq struct {
-	Date        *string   `json:"date"`
-	Description *string   `json:"description"`
-	Flow        *string   `json:"flow"`
-	Subtype     *string   `json:"subtype"`
-	Asset       *string   `json:"asset"`
-	KeyUser     *string   `json:"key_user"`
-	Quantity    *float64  `json:"quantity"`
-	Amount      *int64    `json:"amount"`
-	Notes       *string   `json:"notes"`
-	Tags        *[]string `json:"tags"`
+	Date              *string   `json:"date"`
+	Description       *string   `json:"description"`
+	Flow              *string   `json:"flow"`
+	CustomDescription *string   `json:"custom_description"`
+	Amount            *int64    `json:"amount"`
+	Notes             *string   `json:"notes"`
+	Tags              *[]string `json:"tags"`
 }
 
 // Update godoc
@@ -168,10 +158,7 @@ func (ctrl *TransactionController) Update(c *gin.Context) {
 	}
 	p.Description = req.Description
 	p.Flow = req.Flow
-	p.Subtype = req.Subtype
-	p.Asset = req.Asset
-	p.KeyUser = req.KeyUser
-	p.Quantity = req.Quantity
+	p.CustomDescription = req.CustomDescription
 	p.Amount = req.Amount
 	p.Notes = req.Notes
 	p.Tags = req.Tags
@@ -228,6 +215,66 @@ func (ctrl *TransactionController) ListUsedTags(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, tags)
+}
+
+type createTransactionBatchReq struct {
+	AccountID    int64                     `json:"account_id"   binding:"required"`
+	Transactions []batchTransactionItemReq `json:"transactions" binding:"required,min=1"`
+}
+
+type batchTransactionItemReq struct {
+	Date              string   `json:"date"               binding:"required"`
+	Description       string   `json:"description"        binding:"required"`
+	Flow              string   `json:"flow"               binding:"required"`
+	Amount            int64    `json:"amount"             binding:"required,min=0"`
+	Tags              []string `json:"tags"`
+	Notes             *string  `json:"notes"`
+	CustomDescription *string  `json:"custom_description"`
+}
+
+// CreateBatch godoc
+// @Summary      Bulk-create transactions (e.g. from a credit card statement paste)
+// @Tags         transactions
+// @Accept       json
+// @Produce      json
+// @Param        body  body  createTransactionBatchReq  true  "Batch payload"
+// @Success      200  {object}  map[string]int
+// @Failure      400  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /transactions/bulk [post]
+func (ctrl *TransactionController) CreateBatch(c *gin.Context) {
+	var req createTransactionBatchReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userID := userIDFromContext(c)
+	params := make([]domain.CreateTransactionParams, len(req.Transactions))
+	for i, item := range req.Transactions {
+		date, err := time.Parse("2006-01-02", item.Date)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("item %d: date must be YYYY-MM-DD", i)})
+			return
+		}
+		params[i] = domain.CreateTransactionParams{
+			Date:              date,
+			Description:       item.Description,
+			Flow:              item.Flow,
+			Amount:            item.Amount,
+			Tags:              item.Tags,
+			Notes:             item.Notes,
+			CustomDescription: item.CustomDescription,
+			Source:            "tc_import",
+		}
+	}
+
+	imported, duplicates, err := ctrl.svc.CreateBatch(c.Request.Context(), userID, req.AccountID, params)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"imported": imported, "duplicates": duplicates})
 }
 
 // TagSpending returns per-tag expense totals for the authenticated user.

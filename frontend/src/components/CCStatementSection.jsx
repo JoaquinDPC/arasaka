@@ -126,9 +126,11 @@ export default function CCStatementSection({ statementId }) {
                 <div style={{ marginBottom: 4 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
                     <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Cargos adicionales</span>
-                    <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--red)' }}>
-                      {fmtAmount(commissions.reduce((s, it) => s + it.amount, 0), stmt.currency)}
-                    </span>
+                    {commissions.length > 1 && (
+                      <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--red)' }}>
+                        {fmtAmount(commissions.reduce((s, it) => s + it.amount, 0), stmt.currency)}
+                      </span>
+                    )}
                   </div>
                   {commissions.map(it => (
                     <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px solid var(--border)', gap: 8 }}>

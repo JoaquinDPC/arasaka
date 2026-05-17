@@ -109,11 +109,12 @@ export default function Home() {
   const [year, setYear]   = useState(now.getFullYear())
   const { selectedId, selectedAccount } = useAccount()
 
-  const [kpis, setKpis]       = useState(null)
-  const [tagSpend, setTagSpend] = useState([])
-  const [recent, setRecent]   = useState([])
-  const [loading, setLoading] = useState(true)
-  const [selTx, setSelTx]     = useState(null)
+  const [kpis, setKpis]             = useState(null)
+  const [tagSpend, setTagSpend]     = useState([])
+  const [recent, setRecent]         = useState([])
+  const [installments, setInstallments] = useState([])
+  const [loading, setLoading]       = useState(true)
+  const [selTx, setSelTx]           = useState(null)
 
   useEffect(() => {
     setLoading(true)
@@ -121,11 +122,13 @@ export default function Home() {
       api.kpis(year, selectedId),
       api.tagSpending({ month, year, ...(selectedId ? { account_id: selectedId } : {}) }),
       api.transactions({ month, year, limit: 30, account_id: selectedId ?? undefined }),
+      api.installments(),
     ])
-      .then(([kpiData, tags, txData]) => {
+      .then(([kpiData, tags, txData, instData]) => {
         setKpis(kpiData)
         setTagSpend(Array.isArray(tags) ? tags.filter(t => t.total > 0) : [])
         setRecent(Array.isArray(txData) ? txData : (txData?.transactions ?? []))
+        setInstallments(Array.isArray(instData) ? instData : [])
       })
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -206,6 +209,39 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {/* ── ACTIVE INSTALLMENTS ── */}
+      {installments.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', fontWeight: 700, marginBottom: 10 }}>
+            Cuotas de tarjeta activas
+          </div>
+          <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 4 }}>
+            {installments.map(inst => {
+              const cur = inst.installment_current ?? 1
+              const tot = inst.installment_total ?? 1
+              const remaining = tot - cur
+              const pct = Math.round((cur / tot) * 100)
+              return (
+                <div key={inst.id} style={{ minWidth: 200, maxWidth: 220, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r)', padding: '14px 16px', flexShrink: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 8, color: 'var(--text)' }}>
+                    {inst.description}
+                  </div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 15, fontWeight: 700, color: 'var(--red)', marginBottom: 2 }}>
+                    {formatCLP(inst.amount)}<span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-dim)' }}>/mes</span>
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--mono)', marginBottom: 8 }}>
+                    cuota {cur}/{tot} · {remaining} restante{remaining !== 1 ? 's' : ''}
+                  </div>
+                  <div style={{ height: 3, borderRadius: 2, background: 'var(--surface2)' }}>
+                    <div style={{ height: '100%', borderRadius: 2, background: 'var(--accent)', width: `${pct}%` }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ── MONTH NAV ── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>

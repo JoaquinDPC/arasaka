@@ -14,10 +14,10 @@ type MonthlyReport struct {
 	Balance     int64             `json:"balance"`
 	SavingsRate float64           `json:"savings_rate"`
 	ByCategory  []CategorySummary `json:"by_category"`
-	BySubtype   map[string]int64  `json:"by_subtype"`
 	TopExpenses []Transaction     `json:"top_expenses"`
 }
 
+// CategorySummary groups expense totals by tag (formerly by category column).
 type CategorySummary struct {
 	Category     string  `json:"category"`
 	Total        int64   `json:"total"`
@@ -41,7 +41,6 @@ type KPIReport struct {
 	InvestmentsYTD int64   `json:"investments_ytd"`
 	InvestmentRate float64 `json:"investment_rate"`
 	CostOfLiving   float64 `json:"cost_of_living"`
-	FixedExpenses  int64   `json:"fixed_expenses"`
 }
 
 type Insight struct {
@@ -74,7 +73,7 @@ type TagSuggestion struct {
 
 // InferTagsResult groups all suggestions for a given description.
 type InferTagsResult struct {
-	Description string          `json:"description"`
-	Suggestions []TagSuggestion `json:"suggestions"`
-	KeyUser     *string         `json:"key_user,omitempty"`
+	Description       string          `json:"description"`
+	Suggestions       []TagSuggestion `json:"suggestions"`
+	CustomDescription *string         `json:"custom_description,omitempty"`
 }

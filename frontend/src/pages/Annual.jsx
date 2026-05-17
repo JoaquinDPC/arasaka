@@ -48,9 +48,9 @@ function ChartTooltip({ active, payload, label }) {
 
 export default function Annual() {
   const { selectedId } = useAccount()
-  const [year, setYear]                 = useState(new Date().getFullYear())
-  const [data, setData]                 = useState(null)
-  const [loading, setLoading]           = useState(true)
+  const [year, setYear]   = useState(new Date().getFullYear())
+  const [data, setData]   = useState(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
@@ -242,6 +242,44 @@ export default function Annual() {
                     />} />
                 )}
               </div>
+
+              {(data?.active_installments ?? []).length > 0 && (
+                <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 10 }}>
+                    Cuotas de tarjeta activas
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {(data?.active_installments ?? []).map(inst => {
+                      const cur = inst.installment_current ?? 1
+                      const tot = inst.installment_total ?? 1
+                      const remaining = tot - cur
+                      const pct = Math.round((cur / tot) * 100)
+                      return (
+                        <div key={inst.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 12, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)', marginBottom: 2 }}>
+                                {inst.description}
+                              </div>
+                              <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--mono)' }}>
+                                {cur}/{tot} cuotas · {remaining} restante{remaining !== 1 ? 's' : ''}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                              <div style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: 'var(--red)' }}>
+                                {formatCLP(inst.amount)}<span style={{ color: 'var(--text-dim)', fontWeight: 400, fontSize: 10 }}>/mes</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div style={{ height: 3, borderRadius: 2, background: 'var(--surface2)' }}>
+                            <div style={{ height: '100%', borderRadius: 2, background: 'var(--accent)', width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </>

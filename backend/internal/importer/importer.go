@@ -55,20 +55,20 @@ type CCStatementResult struct {
 	ItemsDuplicates int    `json:"items_duplicates"`
 }
 
-// AutoTagger applies app-level tag rules to batch import params.
+// AutoTagger applies tag inference rules to batch import params.
 type AutoTagger interface {
-	AutoTagBatch(ctx context.Context, userID int64, params []domain.CreateTransactionParams) []domain.CreateTransactionParams
+	AutoTagBatch(ctx context.Context, userID int64, settings domain.AccountSettings, params []domain.CreateTransactionParams) []domain.CreateTransactionParams
 }
 
 // Run processes records, routing corriente → transactions, credito → CC tables.
 // fromDate is the exclusive lower bound; zero value means import everything.
 // accountID links imported bank transactions to a specific account when non-nil.
-// autoTagger is optional; when non-nil it applies app-level tag rules before insert.
+// autoTagger is optional; when non-nil it applies inference rules before insert.
 // bankID is a domain.BankXxx constant used to apply bank-specific description cleaning;
 // empty string disables cleaning.
 // Records are iterated in reverse so that JSON-newest-first ordering yields
 // oldest records getting the lowest DB IDs.
-func Run(ctx context.Context, db *sql.DB, records []MovimientoRecord, fromDate time.Time, accountID *int64, userID *int64, autoTagger AutoTagger, bankID domain.BankID, logger *slog.Logger) (Result, error) {
+func Run(ctx context.Context, db *sql.DB, records []MovimientoRecord, fromDate time.Time, accountID *int64, userID *int64, autoTagger AutoTagger, accountSettings domain.AccountSettings, bankID domain.BankID, logger *slog.Logger) (Result, error) {
 	txRepo := repository.NewTransactionRepository(db)
 	ccRepo := repository.NewCreditCardRepository(db)
 
@@ -99,7 +99,7 @@ func Run(ctx context.Context, db *sql.DB, records []MovimientoRecord, fromDate t
 
 	if len(bankParams) > 0 {
 		if autoTagger != nil && userID != nil {
-			bankParams = autoTagger.AutoTagBatch(ctx, *userID, bankParams)
+			bankParams = autoTagger.AutoTagBatch(ctx, *userID, accountSettings, bankParams)
 		}
 		imported, dupes, err := txRepo.CreateBatch(ctx, bankParams)
 		if err != nil {
@@ -155,7 +155,6 @@ func mapBankRecord(r MovimientoRecord, accountID *int64, userID *int64, bankID d
 	return domain.CreateTransactionParams{
 		Date:        date,
 		Description: cleanDescription(bankID, r.Description),
-		Category:    "NAN",
 		Flow:        flow,
 		Amount:      amount,
 		Currency:    "CLP",

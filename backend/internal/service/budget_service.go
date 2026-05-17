@@ -6,31 +6,14 @@ import (
 	"arasaka/internal/domain"
 )
 
-// BudgetService handles business logic for budget targets.
+// BudgetService handles business logic for tag budgets and user tags.
 type BudgetService struct {
-	budgets    domain.BudgetRepository
 	userTags   domain.UserTagRepository
 	tagBudgets domain.TagBudgetRepository
 }
 
-func NewBudgetService(budgets domain.BudgetRepository, userTags domain.UserTagRepository, tagBudgets domain.TagBudgetRepository) *BudgetService {
-	return &BudgetService{budgets: budgets, userTags: userTags, tagBudgets: tagBudgets}
-}
-
-func (s *BudgetService) ListBudgets(ctx context.Context, userID int64, year string) ([]domain.Budget, error) {
-	return s.budgets.List(ctx, userID, year)
-}
-
-func (s *BudgetService) UpsertBudget(ctx context.Context, b domain.Budget) (domain.Budget, error) {
-	return s.budgets.Upsert(ctx, b)
-}
-
-func (s *BudgetService) UpsertBatch(ctx context.Context, budgets []domain.Budget) error {
-	return s.budgets.UpsertBatch(ctx, budgets)
-}
-
-func (s *BudgetService) ListCategories(ctx context.Context) ([]string, error) {
-	return s.budgets.ListCategories(ctx)
+func NewBudgetService(userTags domain.UserTagRepository, tagBudgets domain.TagBudgetRepository) *BudgetService {
+	return &BudgetService{userTags: userTags, tagBudgets: tagBudgets}
 }
 
 func (s *BudgetService) ListUserTags(ctx context.Context, userID int64) ([]string, error) {

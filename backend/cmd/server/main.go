@@ -20,6 +20,7 @@ import (
 	_ "arasaka/docs"
 	"arasaka/internal/config"
 	"arasaka/internal/controller"
+	"arasaka/internal/crypto"
 	"arasaka/internal/logger"
 	"arasaka/internal/repository"
 	"arasaka/internal/service"
@@ -59,7 +60,6 @@ func main() {
 	userRepo := repository.NewUserRepository(db)
 	accountRepo := repository.NewAccountRepository(db)
 	txRepo := repository.NewTransactionRepository(db)
-	budgetRepo := repository.NewBudgetRepository(db)
 	userTagRepo := repository.NewUserTagRepository(db)
 	tagBudgetRepo := repository.NewTagBudgetRepository(db)
 	reportRepo := repository.NewReportRepository(db)
@@ -70,26 +70,36 @@ func main() {
 	// ── Services (business logic) ──────────────────────────────────────────────────────────
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
 	accountSvc := service.NewAccountService(accountRepo)
-	budgetSvc := service.NewBudgetService(budgetRepo, userTagRepo, tagBudgetRepo)
-	inferenceSvc := service.NewTagInferenceService(appTagRuleRepo, tagHistoryRepo, userRepo)
-	txSvc := service.NewTransactionService(txRepo, budgetRepo, userTagRepo, inferenceSvc)
+	budgetSvc := service.NewBudgetService(userTagRepo, tagBudgetRepo)
+	inferenceSvc := service.NewTagInferenceService(appTagRuleRepo, tagHistoryRepo, accountRepo)
+	txSvc := service.NewTransactionService(txRepo, userTagRepo, inferenceSvc)
 	reportSvc := service.NewReportService(reportRepo)
 	syncSvc := service.NewSyncService(db, cfg.BancochileUser, cfg.BancochilePassword, cfg.SantanderUser, cfg.SantanderPassword, inferenceSvc, log)
 	importSvc := service.NewImportService(db, inferenceSvc)
 	ccSvc := service.NewCreditCardService(ccRepo, db)
 
+	// ── Master key for PDF password encryption ────────────────────────────────────────────────
+	var masterKey []byte
+	if cfg.MasterKey != "" {
+		masterKey, err = crypto.MasterKeyFromHex(cfg.MasterKey)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "invalid master_key in config:", err)
+			os.Exit(1)
+		}
+	}
+
 	// ── Controllers (HTTP handlers) ──────────────────────────────────────────────────────────
 	ctrl := Controllers{
 		Auth:         controller.NewAuthController(authSvc),
-		Accounts:     controller.NewAccountController(accountSvc),
+		Accounts:     controller.NewAccountController(accountSvc, masterKey),
 		Transactions: controller.NewTransactionController(txSvc),
 		Budgets:      controller.NewBudgetController(budgetSvc),
 		Reports:      controller.NewReportController(reportSvc),
 		Insights:     controller.NewInsightController(reportSvc),
 		Sync:         controller.NewSyncController(syncSvc),
 		Import:       controller.NewImportController(importSvc),
-		Inference:    controller.NewInferenceController(inferenceSvc, userRepo),
-		CreditCard:   controller.NewCreditCardController(ccSvc),
+		Inference:    controller.NewInferenceController(inferenceSvc),
+		CreditCard:   controller.NewCreditCardController(ccSvc, accountSvc, masterKey),
 	}
 
 	gin.SetMode(gin.ReleaseMode)
@@ -98,7 +108,10 @@ func main() {
 	r.Use(corsMiddleware())
 	r.Use(requestLogger(log))
 
-	registerRoutes(r, ctrl, cfg.JWTSecret)
+	if cfg.DevBypassAuth {
+		fmt.Println("WARNING: dev_bypass_auth is enabled — all requests run as user 1")
+	}
+	registerRoutes(r, ctrl, cfg.JWTSecret, cfg.DevBypassAuth)
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	addr := ":" + cfg.ServerPort

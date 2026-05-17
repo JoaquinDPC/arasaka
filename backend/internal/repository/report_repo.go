@@ -30,23 +30,24 @@ func (r *reportRepo) MonthlyTotals(ctx context.Context, year, month int, account
 	return
 }
 
-func (r *reportRepo) CategoryTotals(ctx context.Context, year, month int, accountID *int64) ([]domain.CategorySummary, error) {
+// TagTotals returns expense totals grouped by tag for a given month, joined with tag_budgets.
+func (r *reportRepo) TagTotals(ctx context.Context, year, month int, accountID *int64) ([]domain.CategorySummary, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
-			t.category,
-			SUM(t.amount) AS total,
+			t.tag,
+			SUM(tr.amount) AS total,
 			COALESCE(
-				(SELECT amount FROM budgets WHERE category = t.category AND year = $1 AND month = $2),
-				(SELECT amount FROM budgets WHERE category = t.category AND year = $1 AND month = 0),
+				(SELECT amount FROM tag_budgets WHERE tag = t.tag AND year = $1 AND month = $2),
+				(SELECT amount FROM tag_budgets WHERE tag = t.tag AND year = $1 AND month = 0),
 				0
 			) AS budget,
 			COUNT(*) AS cnt
-		FROM transactions t
-		WHERE EXTRACT(YEAR FROM t.date) = $1
-		  AND EXTRACT(MONTH FROM t.date) = $2
-		  AND t.flow = 'EXPENSE'
-		  AND ($3::bigint IS NULL OR t.account_id = $3)
-		GROUP BY t.category
+		FROM transactions tr, unnest(tr.tags) AS t(tag)
+		WHERE EXTRACT(YEAR FROM tr.date) = $1
+		  AND EXTRACT(MONTH FROM tr.date) = $2
+		  AND tr.flow = 'EXPENSE'
+		  AND ($3::bigint IS NULL OR tr.account_id = $3)
+		GROUP BY t.tag
 		ORDER BY total DESC
 	`, year, month, accountID)
 	if err != nil {
@@ -68,37 +69,12 @@ func (r *reportRepo) CategoryTotals(ctx context.Context, year, month int, accoun
 	if result == nil {
 		result = []domain.CategorySummary{}
 	}
-	return result, nil
-}
-
-func (r *reportRepo) SubtypeTotals(ctx context.Context, year, month int, accountID *int64) (map[string]int64, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT COALESCE(subtype, 'N/A'), COALESCE(SUM(amount), 0)
-		FROM transactions
-		WHERE EXTRACT(YEAR FROM date) = $1
-		  AND EXTRACT(MONTH FROM date) = $2
-		  AND flow = 'EXPENSE'
-		  AND ($3::bigint IS NULL OR account_id = $3)
-		GROUP BY subtype
-	`, year, month, accountID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	result := make(map[string]int64)
-	for rows.Next() {
-		var st string
-		var total int64
-		rows.Scan(&st, &total)
-		result[st] = total
-	}
-	return result, nil
+	return result, rows.Err()
 }
 
 func (r *reportRepo) TopExpenses(ctx context.Context, year, month, limit int, accountID *int64) ([]domain.Transaction, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, date, description, category, flow, subtype, asset, quantity, amount, notes, source, bank_raw_id, created_at, updated_at
+		SELECT id, date, description, flow, amount, source, created_at, updated_at
 		FROM transactions
 		WHERE EXTRACT(YEAR FROM date) = $1
 		  AND EXTRACT(MONTH FROM date) = $2
@@ -115,9 +91,7 @@ func (r *reportRepo) TopExpenses(ctx context.Context, year, month, limit int, ac
 	var txs []domain.Transaction
 	for rows.Next() {
 		var t domain.Transaction
-		rows.Scan(&t.ID, &t.Date, &t.Description, &t.Category, &t.Flow,
-			&t.Subtype, &t.Asset, &t.Quantity, &t.Amount, &t.Notes,
-			&t.Source, &t.BankRawID, &t.CreatedAt, &t.UpdatedAt)
+		rows.Scan(&t.ID, &t.Date, &t.Description, &t.Flow, &t.Amount, &t.Source, &t.CreatedAt, &t.UpdatedAt)
 		txs = append(txs, t)
 	}
 	if txs == nil {
@@ -126,18 +100,17 @@ func (r *reportRepo) TopExpenses(ctx context.Context, year, month, limit int, ac
 	return txs, nil
 }
 
-func (r *reportRepo) YearlyKPIs(ctx context.Context, year int, accountID *int64) (opening, income, expenses, investments, fixed int64, err error) {
+func (r *reportRepo) YearlyKPIs(ctx context.Context, year int, accountID *int64) (opening, income, expenses, investments int64, err error) {
 	err = r.db.QueryRowContext(ctx, `
 		SELECT
 			COALESCE(SUM(CASE WHEN flow = 'OPENING' THEN amount ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN flow = 'INCOME'  THEN amount ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN flow = 'EXPENSE' THEN amount ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN flow = 'INVEST'  THEN amount ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN flow = 'EXPENSE' AND subtype = 'FIJO' THEN amount ELSE 0 END), 0)
+			COALESCE(SUM(CASE WHEN flow = 'INVEST'  THEN amount ELSE 0 END), 0)
 		FROM transactions
 		WHERE EXTRACT(YEAR FROM date) = $1
 		  AND ($2::bigint IS NULL OR account_id = $2)
-	`, year, accountID).Scan(&opening, &income, &expenses, &investments, &fixed)
+	`, year, accountID).Scan(&opening, &income, &expenses, &investments)
 	return
 }
 
@@ -179,83 +152,6 @@ func (r *reportRepo) MonthlyTrend(ctx context.Context, year int, accountID *int6
 	return trend, nil
 }
 
-func (r *reportRepo) BudgetVsActual(ctx context.Context, year, month int, accountID *int64) ([]domain.CategorySummary, error) {
-	budgetRows, err := r.db.QueryContext(ctx, `
-		SELECT DISTINCT category FROM budgets WHERE year = $1
-	`, year)
-	if err != nil {
-		return nil, err
-	}
-	defer budgetRows.Close()
-
-	var budgetCats []string
-	for budgetRows.Next() {
-		var cat string
-		budgetRows.Scan(&cat)
-		budgetCats = append(budgetCats, cat)
-	}
-
-	actualRows, err := r.db.QueryContext(ctx, `
-		SELECT category, COALESCE(SUM(amount), 0), COUNT(*)
-		FROM transactions
-		WHERE EXTRACT(YEAR FROM date) = $1
-		  AND EXTRACT(MONTH FROM date) = $2
-		  AND flow = 'EXPENSE'
-		  AND ($3::bigint IS NULL OR account_id = $3)
-		GROUP BY category
-	`, year, month, accountID)
-	if err != nil {
-		return nil, err
-	}
-	defer actualRows.Close()
-
-	actuals := map[string]domain.CategorySummary{}
-	for actualRows.Next() {
-		var cs domain.CategorySummary
-		actualRows.Scan(&cs.Category, &cs.Total, &cs.Transactions)
-		actuals[cs.Category] = cs
-	}
-
-	var result []domain.CategorySummary
-	seen := map[string]bool{}
-
-	appendCat := func(cat string) {
-		if seen[cat] {
-			return
-		}
-		seen[cat] = true
-		cs := actuals[cat]
-		cs.Category = cat
-
-		var budget int64
-		r.db.QueryRowContext(ctx, `
-			SELECT COALESCE(
-				(SELECT amount FROM budgets WHERE category=$1 AND year=$2 AND month=$3),
-				(SELECT amount FROM budgets WHERE category=$1 AND year=$2 AND month=0),
-				0
-			)
-		`, cat, year, month).Scan(&budget)
-
-		cs.Budget = budget
-		if budget > 0 {
-			cs.PctUsed = float64(cs.Total) / float64(budget)
-		}
-		result = append(result, cs)
-	}
-
-	for _, cat := range budgetCats {
-		appendCat(cat)
-	}
-	for cat := range actuals {
-		appendCat(cat)
-	}
-
-	if result == nil {
-		result = []domain.CategorySummary{}
-	}
-	return result, nil
-}
-
 func (r *reportRepo) MonthlyHistory(ctx context.Context, year, beforeMonth int, accountID *int64) ([]domain.MonthlyReport, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
@@ -288,20 +184,20 @@ func (r *reportRepo) MonthlyHistory(ctx context.Context, year, beforeMonth int, 
 
 		catRows, err := r.db.QueryContext(ctx, `
 			SELECT
-				t.category,
-				SUM(t.amount),
+				t.tag,
+				SUM(tr.amount),
 				COALESCE(
-					(SELECT amount FROM budgets WHERE category = t.category AND year = $1 AND month = $2),
-					(SELECT amount FROM budgets WHERE category = t.category AND year = $1 AND month = 0),
+					(SELECT amount FROM tag_budgets WHERE tag = t.tag AND year = $1 AND month = $2),
+					(SELECT amount FROM tag_budgets WHERE tag = t.tag AND year = $1 AND month = 0),
 					0
 				),
 				COUNT(*)
-			FROM transactions t
-			WHERE EXTRACT(YEAR FROM t.date) = $1
-			  AND EXTRACT(MONTH FROM t.date) = $2
-			  AND t.flow = 'EXPENSE'
-			  AND ($3::bigint IS NULL OR t.account_id = $3)
-			GROUP BY t.category
+			FROM transactions tr, unnest(tr.tags) AS t(tag)
+			WHERE EXTRACT(YEAR FROM tr.date) = $1
+			  AND EXTRACT(MONTH FROM tr.date) = $2
+			  AND tr.flow = 'EXPENSE'
+			  AND ($3::bigint IS NULL OR tr.account_id = $3)
+			GROUP BY t.tag
 		`, year, m.Month, accountID)
 		if err == nil {
 			for catRows.Next() {
@@ -322,17 +218,18 @@ func (r *reportRepo) MonthlyHistory(ctx context.Context, year, beforeMonth int, 
 	return history, nil
 }
 
-func (r *reportRepo) YearlyCategoryTotals(ctx context.Context, year int, accountID *int64) ([]domain.CategorySummary, error) {
+// YearlyTagTotals returns expense totals grouped by tag for a full year.
+func (r *reportRepo) YearlyTagTotals(ctx context.Context, year int, accountID *int64) ([]domain.CategorySummary, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
-			CASE WHEN t.category = 'Nan' THEN 'Sin categoría' ELSE t.category END AS category,
-			SUM(t.amount) AS total,
-			COUNT(*)      AS cnt
-		FROM transactions t
-		WHERE EXTRACT(YEAR FROM t.date) = $1
-		  AND t.flow = 'EXPENSE'
-		  AND ($2::bigint IS NULL OR t.account_id = $2)
-		GROUP BY CASE WHEN t.category = 'Nan' THEN 'Sin categoría' ELSE t.category END
+			t.tag,
+			SUM(tr.amount) AS total,
+			COUNT(*)       AS cnt
+		FROM transactions tr, unnest(tr.tags) AS t(tag)
+		WHERE EXTRACT(YEAR FROM tr.date) = $1
+		  AND tr.flow = 'EXPENSE'
+		  AND ($2::bigint IS NULL OR tr.account_id = $2)
+		GROUP BY t.tag
 		ORDER BY total DESC
 	`, year, accountID)
 	if err != nil {
@@ -356,7 +253,7 @@ func (r *reportRepo) YearlyCategoryTotals(ctx context.Context, year int, account
 
 func (r *reportRepo) YearlyTopExpenses(ctx context.Context, year, limit int, accountID *int64) ([]domain.Transaction, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, date, description, category, flow, subtype, asset, quantity, amount, notes, source, bank_raw_id, created_at, updated_at
+		SELECT id, date, description, flow, amount, source, created_at, updated_at
 		FROM transactions
 		WHERE EXTRACT(YEAR FROM date) = $1
 		  AND flow = 'EXPENSE'
@@ -372,9 +269,7 @@ func (r *reportRepo) YearlyTopExpenses(ctx context.Context, year, limit int, acc
 	var txs []domain.Transaction
 	for rows.Next() {
 		var t domain.Transaction
-		rows.Scan(&t.ID, &t.Date, &t.Description, &t.Category, &t.Flow,
-			&t.Subtype, &t.Asset, &t.Quantity, &t.Amount, &t.Notes,
-			&t.Source, &t.BankRawID, &t.CreatedAt, &t.UpdatedAt)
+		rows.Scan(&t.ID, &t.Date, &t.Description, &t.Flow, &t.Amount, &t.Source, &t.CreatedAt, &t.UpdatedAt)
 		txs = append(txs, t)
 	}
 	if txs == nil {
@@ -383,16 +278,17 @@ func (r *reportRepo) YearlyTopExpenses(ctx context.Context, year, limit int, acc
 	return txs, nil
 }
 
-func (r *reportRepo) AllTimeCategoryTotals(ctx context.Context, accountID *int64) ([]domain.CategorySummary, error) {
+// AllTimeTagTotals returns expense totals grouped by tag across all time.
+func (r *reportRepo) AllTimeTagTotals(ctx context.Context, accountID *int64) ([]domain.CategorySummary, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
-			CASE WHEN category = 'Nan' THEN 'Sin categoría' ELSE category END AS category,
-			SUM(amount) AS total,
-			COUNT(*) AS cnt
-		FROM transactions
-		WHERE flow = 'EXPENSE'
-		  AND ($1::bigint IS NULL OR account_id = $1)
-		GROUP BY CASE WHEN category = 'Nan' THEN 'Sin categoría' ELSE category END
+			t.tag,
+			SUM(tr.amount) AS total,
+			COUNT(*)       AS cnt
+		FROM transactions tr, unnest(tr.tags) AS t(tag)
+		WHERE tr.flow = 'EXPENSE'
+		  AND ($1::bigint IS NULL OR tr.account_id = $1)
+		GROUP BY t.tag
 		ORDER BY total DESC
 	`, accountID)
 	if err != nil {

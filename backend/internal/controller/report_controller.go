@@ -70,6 +70,7 @@ func (ctrl *ReportController) AnnualReport(c *gin.Context) {
 	c.JSON(http.StatusOK, report)
 }
 
+// CategorySummary returns tag-based expense totals. Period: "mes" (default), "año", "todo".
 func (ctrl *ReportController) CategorySummary(c *gin.Context) {
 	period := c.DefaultQuery("period", "mes")
 	year, month := yearMonthParams(c)
@@ -81,11 +82,11 @@ func (ctrl *ReportController) CategorySummary(c *gin.Context) {
 	)
 	switch period {
 	case "todo":
-		result, err = ctrl.svc.GetAllTimeCategoryTotals(c.Request.Context(), accountID)
+		result, err = ctrl.svc.GetAllTimeTagTotals(c.Request.Context(), accountID)
 	case "año":
-		result, err = ctrl.svc.GetYearlyCategoryTotals(c.Request.Context(), year, accountID)
+		result, err = ctrl.svc.GetYearlyTagTotals(c.Request.Context(), year, accountID)
 	default:
-		result, err = ctrl.svc.GetBudgetVsActual(c.Request.Context(), year, month, accountID)
+		result, err = ctrl.svc.GetTagTotals(c.Request.Context(), year, month, accountID)
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -94,10 +95,20 @@ func (ctrl *ReportController) CategorySummary(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+func (ctrl *ReportController) ActiveInstallments(c *gin.Context) {
+	items, err := ctrl.svc.ActiveInstallments(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, items)
+}
+
+// BudgetVsActual returns tag-based spending vs tag_budgets for a given month.
 func (ctrl *ReportController) BudgetVsActual(c *gin.Context) {
 	year, month := yearMonthParams(c)
 	accountID := accountIDParam(c)
-	result, err := ctrl.svc.GetBudgetVsActual(c.Request.Context(), year, month, accountID)
+	result, err := ctrl.svc.GetTagTotals(c.Request.Context(), year, month, accountID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

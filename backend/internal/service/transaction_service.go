@@ -10,14 +10,13 @@ import (
 
 // TransactionService handles business logic for transactions.
 type TransactionService struct {
-	repo         domain.TransactionRepository
-	budgetRepo   domain.BudgetRepository
-	userTagRepo  domain.UserTagRepository
+	repo        domain.TransactionRepository
+	userTagRepo domain.UserTagRepository
 	inferenceSvc *TagInferenceService
 }
 
-func NewTransactionService(repo domain.TransactionRepository, budgetRepo domain.BudgetRepository, userTagRepo domain.UserTagRepository, inferenceSvc *TagInferenceService) *TransactionService {
-	return &TransactionService{repo: repo, budgetRepo: budgetRepo, userTagRepo: userTagRepo, inferenceSvc: inferenceSvc}
+func NewTransactionService(repo domain.TransactionRepository, userTagRepo domain.UserTagRepository, inferenceSvc *TagInferenceService) *TransactionService {
+	return &TransactionService{repo: repo, userTagRepo: userTagRepo, inferenceSvc: inferenceSvc}
 }
 
 // splitCamelCase inserts "-" before each uppercase letter preceded by a lowercase letter.
@@ -72,55 +71,19 @@ func normalizeTags(tags []string) []string {
 	return out
 }
 
-// deriveCategoryFromTags returns the budget category whose name matches the first
-// recognized tag (case-insensitive). Falls back to "Otros" when no tag matches.
-func (s *TransactionService) deriveCategoryFromTags(ctx context.Context, tags []string) string {
-	recognized, err := s.budgetRepo.ListCategories(ctx)
-	if err != nil || len(recognized) == 0 {
-		return "Otros"
-	}
-	for _, t := range tags {
-		for _, c := range recognized {
-			if strings.EqualFold(t, c) {
-				return c // preserve the budget category's exact casing for reports
-			}
-		}
-	}
-	return "Otros"
-}
-
-// titleCase converts a string to title case: each word's first letter uppercased, rest lowercased.
-// e.g. "CASA" → "Casa", "sin categoría" → "Sin Categoría"
-func titleCase(s string) string {
-	words := strings.Fields(s)
-	for i, w := range words {
-		runes := []rune(w)
-		for j, r := range runes {
-			if j == 0 {
-				runes[j] = unicode.ToUpper(r)
-			} else {
-				runes[j] = unicode.ToLower(r)
-			}
-		}
-		words[i] = string(runes)
-	}
-	return strings.Join(words, " ")
-}
-
 func (s *TransactionService) List(ctx context.Context, f domain.TransactionFilter) ([]domain.Transaction, error) {
 	return s.repo.List(ctx, f)
 }
 
 func (s *TransactionService) Create(ctx context.Context, p domain.CreateTransactionParams) (domain.Transaction, error) {
 	p.Tags = normalizeTags(p.Tags)
-	p.Category = s.deriveCategoryFromTags(ctx, p.Tags)
 	t, err := s.repo.Create(ctx, p)
 	if err != nil {
 		return t, err
 	}
 	s.upsertTags(ctx, t.UserID, t.Tags)
 	if s.inferenceSvc != nil && p.UserID != nil {
-		s.inferenceSvc.RecordTagAssignment(ctx, *p.UserID, p.Description, t.Tags, p.KeyUser, p.Source)
+		s.inferenceSvc.RecordTagAssignment(ctx, *p.UserID, p.Description, t.Tags, p.CustomDescription, p.Source)
 	}
 	return t, nil
 }
@@ -129,8 +92,6 @@ func (s *TransactionService) Update(ctx context.Context, id int64, p domain.Upda
 	if p.Tags != nil {
 		normalized := normalizeTags(*p.Tags)
 		p.Tags = &normalized
-		derived := s.deriveCategoryFromTags(ctx, normalized)
-		p.Category = &derived
 	}
 	t, err := s.repo.Update(ctx, id, p)
 	if err != nil {
@@ -139,8 +100,8 @@ func (s *TransactionService) Update(ctx context.Context, id int64, p domain.Upda
 	if p.Tags != nil {
 		s.upsertTags(ctx, t.UserID, t.Tags)
 	}
-	if s.inferenceSvc != nil && t.UserID != nil && (len(t.Tags) > 0 || p.KeyUser != nil) {
-		s.inferenceSvc.RecordTagAssignment(ctx, *t.UserID, t.Description, t.Tags, t.KeyUser, "manual")
+	if s.inferenceSvc != nil && t.UserID != nil && (len(t.Tags) > 0 || p.CustomDescription != nil) {
+		s.inferenceSvc.RecordTagAssignment(ctx, *t.UserID, t.Description, t.Tags, t.CustomDescription, "manual")
 	}
 	return t, nil
 }
@@ -165,3 +126,16 @@ func (s *TransactionService) ListUsedTags(ctx context.Context, userID int64, lim
 func (s *TransactionService) TagSpending(ctx context.Context, userID int64, year, month int, accountID *int64) ([]domain.TagSummary, error) {
 	return s.repo.TagSpending(ctx, userID, year, month, accountID)
 }
+
+func (s *TransactionService) CreateBatch(ctx context.Context, userID int64, accountID int64, params []domain.CreateTransactionParams) (imported, duplicates int, err error) {
+	for i := range params {
+		params[i].UserID = &userID
+		params[i].AccountID = &accountID
+		params[i].Tags = normalizeTags(params[i].Tags)
+		if params[i].Source == "" {
+			params[i].Source = "manual"
+		}
+	}
+	return s.repo.CreateBatch(ctx, params)
+}
+

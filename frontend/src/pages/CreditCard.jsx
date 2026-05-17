@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
+import { useAccount } from '../context/AccountContext'
 
 const NATIONAL_ID = 'credit_card_nacional_facturados'
 const INTL_ID     = 'credit_card_internacional_facturados'
@@ -280,6 +281,9 @@ function ImportPanel({ onImported }) {
   const [linking, setLinking]   = useState(false)
   const [msg, setMsg]           = useState(null)
   const fileRef = useRef(null)
+  const { selectedAccount } = useAccount()
+  const ccAccount = selectedAccount?.type === 'Tarjeta de crédito' ? selectedAccount : null
+  const hasStoredPassword = ccAccount?.settings?.pdf_password !== undefined && ccAccount?.settings?.pdf_password !== ''
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -290,6 +294,7 @@ function ImportPanel({ onImported }) {
       const fd = new FormData()
       fd.append('file', file)
       fd.append('password', password)
+      if (ccAccount) fd.append('account_id', String(ccAccount.id))
       const res = await api.ccImportPDF(fd)
       setMsg({ ok: true, text: `${res.imported} ítems importados` })
       setFile(null)
@@ -353,8 +358,8 @@ function ImportPanel({ onImported }) {
               type="password"
               value={password}
               onChange={e => setPassword(e.target.value)}
-              placeholder="••••"
-              style={{ width: 100, padding: '7px 10px', borderRadius: 7, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: 13 }}
+              placeholder={hasStoredPassword ? 'Clave guardada' : '••••'}
+              style={{ width: 120, padding: '7px 10px', borderRadius: 7, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: 13 }}
             />
           </div>
           <button

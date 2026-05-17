@@ -27,6 +27,10 @@ func (s *AccountService) Update(ctx context.Context, id int64, p domain.UpdateAc
 	return s.repo.Update(ctx, id, p)
 }
 
+func (s *AccountService) GetByID(ctx context.Context, id int64, userID int64) (domain.Account, error) {
+	return s.repo.GetByID(ctx, id, userID)
+}
+
 func (s *AccountService) Delete(ctx context.Context, id int64) error {
 	return s.repo.Delete(ctx, id)
 }

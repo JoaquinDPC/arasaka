@@ -74,7 +74,7 @@ func main() {
 	fmt.Printf("Loaded %d records from %s\n", len(records), jsonPath)
 
 	ctx := context.Background()
-	result, err := importer.Run(ctx, db, records, time.Time{}, nil, nil, nil, domain.BankID(*bankFlag), log)
+	result, err := importer.Run(ctx, db, records, time.Time{}, nil, nil, nil, domain.AccountSettings{}, domain.BankID(*bankFlag), log)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "import: %v\n", err)
 		os.Exit(1)

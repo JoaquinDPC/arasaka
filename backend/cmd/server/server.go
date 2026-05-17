@@ -21,12 +21,12 @@ type Controllers struct {
 	CreditCard   *controller.CreditCardController
 }
 
-func registerRoutes(r *gin.Engine, ctrl Controllers, jwtSecret string) {
+func registerRoutes(r *gin.Engine, ctrl Controllers, jwtSecret string, devBypass bool) {
 	// ── Public ─────────────────────────────────────────────────────────────────
 	r.POST("/api/auth/login", ctrl.Auth.Login)
 
 	// ── Protected ──────────────────────────────────────────────────────────────
-	api := r.Group("/api", middleware.Auth(jwtSecret))
+	api := r.Group("/api", middleware.Auth(jwtSecret, devBypass))
 
 	// ── Accounts ───────────────────────────────────────────────────────────────
 	api.GET("/accounts", ctrl.Accounts.List)
@@ -37,6 +37,7 @@ func registerRoutes(r *gin.Engine, ctrl Controllers, jwtSecret string) {
 	// ── Transactions ───────────────────────────────────────────────────────────
 	api.GET("/transactions", ctrl.Transactions.List)
 	api.POST("/transactions", ctrl.Transactions.Create)
+	api.POST("/transactions/bulk", ctrl.Transactions.CreateBatch)
 	api.PUT("/transactions/:id", ctrl.Transactions.Update)
 	api.DELETE("/transactions/:id", ctrl.Transactions.Delete)
 
@@ -46,12 +47,10 @@ func registerRoutes(r *gin.Engine, ctrl Controllers, jwtSecret string) {
 	api.GET("/reports/trend", ctrl.Reports.Trend)
 	api.GET("/reports/budget-vs-actual", ctrl.Reports.BudgetVsActual)
 	api.GET("/reports/annual", ctrl.Reports.AnnualReport)
+	api.GET("/reports/installments", ctrl.Reports.ActiveInstallments)
 	api.GET("/categories/summary", ctrl.Reports.CategorySummary)
 
-	// ── Budgets ────────────────────────────────────────────────────────────────
-	api.GET("/budgets", ctrl.Budgets.ListBudgets)
-	api.PUT("/budgets", ctrl.Budgets.UpsertBudget)
-	api.PUT("/budgets/base", ctrl.Budgets.UpsertBase)
+	// ── Tags ───────────────────────────────────────────────────────────────────
 	api.GET("/tags", ctrl.Budgets.ListTags)
 	api.GET("/tags/used", ctrl.Transactions.ListUsedTags)
 	api.GET("/tags/spending", ctrl.Transactions.TagSpending)
@@ -75,7 +74,6 @@ func registerRoutes(r *gin.Engine, ctrl Controllers, jwtSecret string) {
 
 	// ── Tag Inference ──────────────────────────────────────────────────────────
 	api.POST("/tags/infer", ctrl.Inference.Infer)
-	api.PUT("/users/settings", ctrl.Inference.UpdateSettings)
 
 	// ── Credit Card ────────────────────────────────────────────────────────────
 	api.GET("/credit-card/statements", ctrl.CreditCard.ListStatements)

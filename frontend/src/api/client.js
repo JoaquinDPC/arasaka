@@ -125,6 +125,19 @@ export const api = {
       .then(async r => { if (!r.ok) throw new Error((await r.json()).error || String(r.status)); return r.json() })
   },
 
+  // Bulk transaction import (e.g. from credit card statement text paste)
+  createTransactionBatch: (accountId, transactions) => post('/transactions/bulk', { account_id: accountId, transactions }),
+
+  // Active installment plans from credit card items (current < total)
+  installments: () => get('/reports/installments'),
+
+  // Link CC purchases to a payment (sets meta.paidPurchaseIds on payment, meta.paidByPaymentId on each purchase)
+  linkPurchases: (paymentId, purchaseIds) => fetch(`/api/transactions/${paymentId}/link-purchases`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ purchase_ids: purchaseIds }),
+  }).then(async r => { if (!r.ok) throw new Error((await r.json()).error || String(r.status)) }),
+
   // Credit card
   ccStatements:   ()         => get('/credit-card/statements'),
   ccStatement:    (id)       => get(`/credit-card/statements/${id}`),
