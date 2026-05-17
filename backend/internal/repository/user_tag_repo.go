@@ -43,7 +43,7 @@ func (r *userTagRepo) ListByUserID(ctx context.Context, userID int64) ([]string,
 
 func (r *userTagRepo) ListWithIcons(ctx context.Context, userID int64) ([]domain.UserTagEntry, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT tag, icon FROM user_tags WHERE user_id = $1 ORDER BY tag`, userID)
+		`SELECT tag, icon, color FROM user_tags WHERE user_id = $1 ORDER BY tag`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +52,7 @@ func (r *userTagRepo) ListWithIcons(ctx context.Context, userID int64) ([]domain
 	result := []domain.UserTagEntry{}
 	for rows.Next() {
 		var e domain.UserTagEntry
-		if err := rows.Scan(&e.Tag, &e.Icon); err != nil {
+		if err := rows.Scan(&e.Tag, &e.Icon, &e.Color); err != nil {
 			return nil, err
 		}
 		result = append(result, e)
@@ -66,8 +66,21 @@ func (r *userTagRepo) SetIcon(ctx context.Context, userID int64, tag, icon strin
 		iconVal = &icon
 	}
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE user_tags SET icon = $1 WHERE user_id = $2 AND tag = $3`,
-		iconVal, userID, tag)
+		`INSERT INTO user_tags (user_id, tag, icon) VALUES ($1, $2, $3)
+		 ON CONFLICT (user_id, tag) DO UPDATE SET icon = EXCLUDED.icon`,
+		userID, tag, iconVal)
+	return err
+}
+
+func (r *userTagRepo) SetColor(ctx context.Context, userID int64, tag, color string) error {
+	var colorVal *string
+	if color != "" {
+		colorVal = &color
+	}
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO user_tags (user_id, tag, color) VALUES ($1, $2, $3)
+		 ON CONFLICT (user_id, tag) DO UPDATE SET color = EXCLUDED.color`,
+		userID, tag, colorVal)
 	return err
 }
 

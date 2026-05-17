@@ -33,7 +33,19 @@ func (s *BudgetService) ListUserTagsWithIcons(ctx context.Context, userID int64)
 }
 
 func (s *BudgetService) SetTagIcon(ctx context.Context, userID int64, tag, icon string) error {
-	return s.userTags.SetIcon(ctx, userID, tag, icon)
+	normalized := toTagFormat(tag)
+	if normalized == "" {
+		return nil
+	}
+	return s.userTags.SetIcon(ctx, userID, normalized, icon)
+}
+
+func (s *BudgetService) SetTagColor(ctx context.Context, userID int64, tag, color string) error {
+	normalized := toTagFormat(tag)
+	if normalized == "" {
+		return nil
+	}
+	return s.userTags.SetColor(ctx, userID, normalized, color)
 }
 
 func (s *BudgetService) DeleteUserTag(ctx context.Context, userID int64, tag string) error {

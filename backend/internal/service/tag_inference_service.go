@@ -21,16 +21,16 @@ func normalizeDescription(s string) string {
 // TagInferenceService provides two-level tag suggestions and batch auto-tagging.
 type TagInferenceService struct {
 	appRules    domain.AppTagRuleRepository
-	history     domain.UserTagHistoryRepository
+	userRules   domain.UserTagRuleRepository
 	accountRepo domain.AccountRepository
 }
 
 func NewTagInferenceService(
 	appRules domain.AppTagRuleRepository,
-	history domain.UserTagHistoryRepository,
+	history domain.UserTagRuleRepository,
 	accountRepo domain.AccountRepository,
 ) *TagInferenceService {
-	return &TagInferenceService{appRules: appRules, history: history, accountRepo: accountRepo}
+	return &TagInferenceService{appRules: appRules, userRules: history, accountRepo: accountRepo}
 }
 
 // InferTags returns tag and custom_description suggestions for a description.
@@ -43,29 +43,26 @@ func (s *TagInferenceService) InferTags(ctx context.Context, userID, accountID i
 	}
 	settings := account.Settings
 
-	if !settings.InferenceEnabled {
-		return domain.InferTagsResult{Description: description, Suggestions: []domain.TagSuggestion{}}, nil
-	}
-
 	key := normalizeDescription(description)
 	seen := make(map[string]struct{})
 	var suggestions []domain.TagSuggestion
 	var customDescription *string
 
-	if settings.PersonalEnabled {
-		entry, err := s.history.Match(ctx, userID, key)
-		if err == nil && entry != nil {
-			for _, tag := range entry.Tags {
+	// Always fetch personal history — custom description is independent of inference settings.
+	personalEntry, err := s.userRules.Match(ctx, userID, key)
+	if err == nil && personalEntry != nil {
+		customDescription = personalEntry.CustomDescription
+		if settings.PersonalTagInference {
+			for _, tag := range personalEntry.Tags {
 				if _, dup := seen[tag]; !dup {
 					seen[tag] = struct{}{}
 					suggestions = append(suggestions, domain.TagSuggestion{Tag: tag, Source: "personal"})
 				}
 			}
-			customDescription = entry.CustomDescription
 		}
 	}
 
-	if settings.AppEnabled {
+	if settings.AppTagInference {
 		rules, err := s.appRules.MatchDescription(ctx, key)
 		if err == nil {
 			for _, rule := range rules {
@@ -86,45 +83,60 @@ func (s *TagInferenceService) InferTags(ctx context.Context, userID, accountID i
 }
 
 // RecordTagAssignment learns from an explicit manual tag or custom_description assignment.
-// Records when source is "manual" and either tags are non-empty or customDescription is non-nil.
-func (s *TagInferenceService) RecordTagAssignment(ctx context.Context, userID int64, description string, tags []string, customDescription *string, source string) {
+// Records when source is "manual" and either tags are non-empty or (customDescription is non-nil and rememberDescription is true).
+// Tags are always recorded; customDescription is only persisted when rememberDescription is true.
+func (s *TagInferenceService) RecordTagAssignment(ctx context.Context, userID int64, description string, tags []string, customDescription *string, source string, rememberDescription bool) {
 	if source != "manual" {
 		return
 	}
-	if len(tags) == 0 && customDescription == nil {
+	if len(tags) == 0 && (customDescription == nil || !rememberDescription) {
 		return
 	}
+	var cd *string
+	if rememberDescription {
+		cd = customDescription
+	}
 	key := normalizeDescription(description)
-	_ = s.history.Upsert(ctx, userID, key, tags, customDescription)
+	_ = s.userRules.Upsert(ctx, userID, key, tags, cd)
 }
 
 // AutoTagBatch applies inference rules to untagged params using the provided account settings.
 // settings comes from the caller (import pipeline) which already has the account.
+// Executes at most 2 DB queries regardless of len(params).
 func (s *TagInferenceService) AutoTagBatch(ctx context.Context, userID int64, settings domain.AccountSettings, params []domain.CreateTransactionParams) []domain.CreateTransactionParams {
-	if !settings.InferenceEnabled {
-		return params
-	}
-
 	result := make([]domain.CreateTransactionParams, len(params))
 	copy(result, params)
 
-	for i, p := range result {
-		key := normalizeDescription(p.Description)
+	// Collect normalized keys for batch lookup.
+	keys := make([]string, len(params))
+	for i, p := range params {
+		keys[i] = normalizeDescription(p.Description)
+	}
 
-		var historyEntry *domain.UserTagHistory
-		if settings.PersonalEnabled {
-			historyEntry, _ = s.history.Match(ctx, userID, key)
-		}
+	// Single query for all personal history entries.
+	historyMap, _ := s.userRules.MatchBatch(ctx, userID, keys)
+	if historyMap == nil {
+		historyMap = map[string]*domain.UserTagRule{}
+	}
+
+	// Single query for all app rules (loaded once, matched in-memory).
+	var appRules []domain.AppTagRule
+	if settings.AppTagInference {
+		appRules, _ = s.appRules.List(ctx)
+	}
+
+	for i, p := range result {
+		key := keys[i]
+		historyEntry := historyMap[key]
 
 		if len(p.Tags) == 0 {
-			if historyEntry != nil && len(historyEntry.Tags) > 0 {
+			if settings.PersonalTagInference && historyEntry != nil && len(historyEntry.Tags) > 0 {
 				result[i].Tags = historyEntry.Tags
-			} else if settings.AppEnabled {
-				rules, err := s.appRules.MatchDescription(ctx, key)
-				if err == nil && len(rules) > 0 {
-					seen := make(map[string]struct{})
-					var tags []string
-					for _, rule := range rules {
+			} else if settings.AppTagInference {
+				seen := make(map[string]struct{})
+				var tags []string
+				for _, rule := range appRules {
+					if strings.Contains(key, rule.Pattern) {
 						for _, tag := range rule.Tags {
 							if _, dup := seen[tag]; !dup {
 								seen[tag] = struct{}{}
@@ -132,6 +144,8 @@ func (s *TagInferenceService) AutoTagBatch(ctx context.Context, userID int64, se
 							}
 						}
 					}
+				}
+				if len(tags) > 0 {
 					result[i].Tags = tags
 				}
 			}

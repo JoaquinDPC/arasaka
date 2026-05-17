@@ -83,7 +83,7 @@ func (s *TransactionService) Create(ctx context.Context, p domain.CreateTransact
 	}
 	s.upsertTags(ctx, t.UserID, t.Tags)
 	if s.inferenceSvc != nil && p.UserID != nil {
-		s.inferenceSvc.RecordTagAssignment(ctx, *p.UserID, p.Description, t.Tags, p.CustomDescription, p.Source)
+		s.inferenceSvc.RecordTagAssignment(ctx, *p.UserID, p.Description, t.Tags, p.CustomDescription, p.Source, p.RememberDescription)
 	}
 	return t, nil
 }
@@ -100,8 +100,9 @@ func (s *TransactionService) Update(ctx context.Context, id int64, p domain.Upda
 	if p.Tags != nil {
 		s.upsertTags(ctx, t.UserID, t.Tags)
 	}
-	if s.inferenceSvc != nil && t.UserID != nil && (len(t.Tags) > 0 || p.CustomDescription != nil) {
-		s.inferenceSvc.RecordTagAssignment(ctx, *t.UserID, t.Description, t.Tags, t.CustomDescription, "manual")
+	rememberDesc := p.RememberDescription != nil && *p.RememberDescription
+	if s.inferenceSvc != nil && t.UserID != nil && (len(t.Tags) > 0 || (p.CustomDescription != nil && rememberDesc)) {
+		s.inferenceSvc.RecordTagAssignment(ctx, *t.UserID, t.Description, t.Tags, t.CustomDescription, "manual", rememberDesc)
 	}
 	return t, nil
 }

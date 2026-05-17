@@ -19,6 +19,7 @@ type Controllers struct {
 	Import       *controller.ImportController
 	Inference    *controller.InferenceController
 	CreditCard   *controller.CreditCardController
+	AdminTagRule *controller.AdminTagRuleController
 }
 
 func registerRoutes(r *gin.Engine, ctrl Controllers, jwtSecret string, devBypass bool) {
@@ -57,6 +58,7 @@ func registerRoutes(r *gin.Engine, ctrl Controllers, jwtSecret string, devBypass
 	api.GET("/tags/personal", ctrl.Budgets.ListPersonalTags)
 	api.POST("/tags/personal", ctrl.Budgets.SavePersonalTag)
 	api.PUT("/tags/personal/:tag/icon", ctrl.Budgets.SetTagIcon)
+	api.PUT("/tags/personal/:tag/color", ctrl.Budgets.SetTagColor)
 	api.DELETE("/tags/personal/:tag", ctrl.Budgets.DeletePersonalTag)
 
 	// ── Tag Budgets ────────────────────────────────────────────────────────────
@@ -74,6 +76,12 @@ func registerRoutes(r *gin.Engine, ctrl Controllers, jwtSecret string, devBypass
 
 	// ── Tag Inference ──────────────────────────────────────────────────────────
 	api.POST("/tags/infer", ctrl.Inference.Infer)
+
+	// ── Admin: Tag Rules ───────────────────────────────────────────────────────
+	api.GET("/admin/tag-rules", ctrl.AdminTagRule.ListRules)
+	api.POST("/admin/tag-rules", ctrl.AdminTagRule.CreateRule)
+	api.DELETE("/admin/tag-rules/:id", ctrl.AdminTagRule.DeleteRule)
+	api.GET("/admin/popular-keys", ctrl.AdminTagRule.PopularUnmatched)
 
 	// ── Credit Card ────────────────────────────────────────────────────────────
 	api.GET("/credit-card/statements", ctrl.CreditCard.ListStatements)

@@ -64,13 +64,14 @@ func main() {
 	tagBudgetRepo := repository.NewTagBudgetRepository(db)
 	reportRepo := repository.NewReportRepository(db)
 	appTagRuleRepo := repository.NewAppTagRuleRepository(db)
-	tagHistoryRepo := repository.NewUserTagHistoryRepository(db)
+	tagHistoryRepo := repository.NewUserTagRuleRepository(db)
 	ccRepo := repository.NewCreditCardRepository(db)
 
 	// ── Services (business logic) ──────────────────────────────────────────────────────────
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
 	accountSvc := service.NewAccountService(accountRepo)
 	budgetSvc := service.NewBudgetService(userTagRepo, tagBudgetRepo)
+	adminTagRuleSvc := service.NewAdminTagRuleService(appTagRuleRepo, tagHistoryRepo)
 	inferenceSvc := service.NewTagInferenceService(appTagRuleRepo, tagHistoryRepo, accountRepo)
 	txSvc := service.NewTransactionService(txRepo, userTagRepo, inferenceSvc)
 	reportSvc := service.NewReportService(reportRepo)
@@ -100,6 +101,7 @@ func main() {
 		Import:       controller.NewImportController(importSvc),
 		Inference:    controller.NewInferenceController(inferenceSvc),
 		CreditCard:   controller.NewCreditCardController(ccSvc, accountSvc, masterKey),
+		AdminTagRule: controller.NewAdminTagRuleController(adminTagRuleSvc),
 	}
 
 	gin.SetMode(gin.ReleaseMode)

@@ -59,14 +59,15 @@ func (ctrl *TransactionController) List(c *gin.Context) {
 }
 
 type createTransactionReq struct {
-	Date              string   `json:"date"               binding:"required"`
-	Description       string   `json:"description"        binding:"required"`
-	Flow              string   `json:"flow"               binding:"required"`
-	CustomDescription *string  `json:"custom_description"`
-	Amount            int64    `json:"amount"             binding:"required,min=0"`
-	Notes             *string  `json:"notes"`
-	AccountID         *int64   `json:"account_id"`
-	Tags              []string `json:"tags"`
+	Date                string   `json:"date"                  binding:"required"`
+	Description         string   `json:"description"           binding:"required"`
+	Flow                string   `json:"flow"                  binding:"required"`
+	CustomDescription   *string  `json:"custom_description"`
+	Amount              int64    `json:"amount"                binding:"required,min=0"`
+	Notes               *string  `json:"notes"`
+	AccountID           *int64   `json:"account_id"`
+	Tags                []string `json:"tags"`
+	RememberDescription bool     `json:"remember_description"`
 }
 
 // Create godoc
@@ -94,16 +95,17 @@ func (ctrl *TransactionController) Create(c *gin.Context) {
 
 	userID := userIDFromContext(c)
 	t, err := ctrl.svc.Create(c.Request.Context(), domain.CreateTransactionParams{
-		Date:              date,
-		Description:       req.Description,
-		Flow:              req.Flow,
-		CustomDescription: req.CustomDescription,
-		Amount:            req.Amount,
-		Notes:             req.Notes,
-		Source:            "manual",
-		AccountID:         req.AccountID,
-		Tags:              req.Tags,
-		UserID:            &userID,
+		Date:                date,
+		Description:         req.Description,
+		Flow:                req.Flow,
+		CustomDescription:   req.CustomDescription,
+		Amount:              req.Amount,
+		Notes:               req.Notes,
+		Source:              "manual",
+		AccountID:           req.AccountID,
+		Tags:                req.Tags,
+		UserID:              &userID,
+		RememberDescription: req.RememberDescription,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -113,13 +115,14 @@ func (ctrl *TransactionController) Create(c *gin.Context) {
 }
 
 type updateTransactionReq struct {
-	Date              *string   `json:"date"`
-	Description       *string   `json:"description"`
-	Flow              *string   `json:"flow"`
-	CustomDescription *string   `json:"custom_description"`
-	Amount            *int64    `json:"amount"`
-	Notes             *string   `json:"notes"`
-	Tags              *[]string `json:"tags"`
+	Date                *string   `json:"date"`
+	Description         *string   `json:"description"`
+	Flow                *string   `json:"flow"`
+	CustomDescription   *string   `json:"custom_description"`
+	Amount              *int64    `json:"amount"`
+	Notes               *string   `json:"notes"`
+	Tags                *[]string `json:"tags"`
+	RememberDescription *bool     `json:"remember_description"`
 }
 
 // Update godoc
@@ -162,6 +165,7 @@ func (ctrl *TransactionController) Update(c *gin.Context) {
 	p.Amount = req.Amount
 	p.Notes = req.Notes
 	p.Tags = req.Tags
+	p.RememberDescription = req.RememberDescription
 
 	t, err := ctrl.svc.Update(c.Request.Context(), id, p)
 	if err != nil {

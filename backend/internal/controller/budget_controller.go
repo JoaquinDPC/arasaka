@@ -19,14 +19,9 @@ func NewBudgetController(svc *service.BudgetService) *BudgetController {
 	return &BudgetController{svc: svc}
 }
 
-// ListTags returns the user's personal tag names (formerly sourced from the budgets table).
+// ListTags returns the system-wide default tag list for autocomplete/discovery.
 func (ctrl *BudgetController) ListTags(c *gin.Context) {
-	tags, err := ctrl.svc.ListUserTags(c.Request.Context(), userIDFromContext(c))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, tags)
+	c.JSON(http.StatusOK, domain.DefaultTags)
 }
 
 type savePersonalTagReq struct {
@@ -74,6 +69,29 @@ func (ctrl *BudgetController) SetTagIcon(c *gin.Context) {
 		return
 	}
 	if err := ctrl.svc.SetTagIcon(c.Request.Context(), userIDFromContext(c), tag, req.Icon); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+type setTagColorReq struct {
+	Color string `json:"color"`
+}
+
+// SetTagColor sets or clears the color override for one of the user's personal tags.
+func (ctrl *BudgetController) SetTagColor(c *gin.Context) {
+	tag := c.Param("tag")
+	if tag == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tag required"})
+		return
+	}
+	var req setTagColorReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := ctrl.svc.SetTagColor(c.Request.Context(), userIDFromContext(c), tag, req.Color); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

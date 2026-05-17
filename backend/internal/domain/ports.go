@@ -41,11 +41,13 @@ type TransactionRepository interface {
 // UserTagRepository is the port for user-defined tag persistence.
 type UserTagRepository interface {
 	ListByUserID(ctx context.Context, userID int64) ([]string, error)
-	// ListWithIcons returns the user's tags with optional icon overrides.
+	// ListWithIcons returns the user's tags with optional icon and color overrides.
 	ListWithIcons(ctx context.Context, userID int64) ([]UserTagEntry, error)
 	Upsert(ctx context.Context, userID int64, tag string) error
 	// SetIcon sets or clears the icon override for a tag (empty string clears it).
 	SetIcon(ctx context.Context, userID int64, tag, icon string) error
+	// SetColor sets or clears the color override for a tag (empty string clears it).
+	SetColor(ctx context.Context, userID int64, tag, color string) error
 	// Delete removes a tag from the user's personal vocabulary.
 	Delete(ctx context.Context, userID int64, tag string) error
 }
@@ -54,6 +56,8 @@ type UserTagRepository interface {
 type TagBudgetRepository interface {
 	List(ctx context.Context, userID int64, year int) ([]TagBudget, error)
 	Upsert(ctx context.Context, b TagBudget) error
+	// Delete removes all budget entries for a tag across all years/months.
+	Delete(ctx context.Context, userID int64, tag string) error
 }
 
 // CreditCardRepository handles persistence for CC statements and their line items.
@@ -69,15 +73,23 @@ type CreditCardRepository interface {
 type AppTagRuleRepository interface {
 	// MatchDescription returns rules whose pattern is a substring of normalizedDesc.
 	MatchDescription(ctx context.Context, normalizedDesc string) ([]AppTagRule, error)
+	List(ctx context.Context) ([]AppTagRule, error)
+	Create(ctx context.Context, pattern string, tags []string) (AppTagRule, error)
+	Delete(ctx context.Context, id int64) error
 }
 
-// UserTagHistoryRepository is the port for behavioral tag and custom_description learning per user.
-type UserTagHistoryRepository interface {
+// UserTagRuleRepository is the port for behavioral tag and custom_description learning per user.
+type UserTagRuleRepository interface {
 	// Upsert records or updates a description-to-tag and description-to-custom_description mapping, incrementing use_count.
 	// customDescription nil leaves any existing custom_description value unchanged.
 	Upsert(ctx context.Context, userID int64, descriptionKey string, tags []string, customDescription *string) error
-	// Match returns the history entry for an exact description_key, or nil if not found.
-	Match(ctx context.Context, userID int64, descriptionKey string) (*UserTagHistory, error)
+	// Match returns the rule entry for an exact description_key, or nil if not found.
+	Match(ctx context.Context, userID int64, descriptionKey string) (*UserTagRule, error)
+	// MatchBatch returns a map of description_key → rule for all keys that have a match.
+	MatchBatch(ctx context.Context, userID int64, keys []string) (map[string]*UserTagRule, error)
+	// PopularUnmatched returns the top `limit` rule entries by use_count for userID
+	// that are not already covered by any app_tag_rule pattern.
+	PopularUnmatched(ctx context.Context, userID int64, limit int) ([]UserTagRule, error)
 }
 
 // ReportRepository is the port for complex read-only aggregations.

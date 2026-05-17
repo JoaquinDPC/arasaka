@@ -14,11 +14,10 @@ import (
 
 // AccountSettings holds per-account configuration stored as JSONB on the accounts table.
 type AccountSettings struct {
-	InferenceEnabled bool   `json:"inference_enabled"`
-	PersonalEnabled  bool   `json:"personal_enabled"`
-	AppEnabled       bool   `json:"app_enabled"`
-	MonthlySalary    int64  `json:"monthly_salary,omitempty"`
-	PDFPassword      string `json:"pdf_password,omitempty"`
+	AppTagInference      bool   `json:"app_tag_inference"`
+	PersonalTagInference bool   `json:"personal_tag_inference"`
+	MonthlySalary        int64  `json:"monthly_salary,omitempty"`
+	PDFPassword          string `json:"pdf_password,omitempty"`
 }
 
 // Scan implements sql.Scanner for PostgreSQL JSONB → AccountSettings.
@@ -30,7 +29,7 @@ func (s *AccountSettings) Scan(src any) error {
 	case string:
 		b = []byte(v)
 	case nil:
-		*s = AccountSettings{InferenceEnabled: true, PersonalEnabled: true, AppEnabled: true}
+		*s = AccountSettings{AppTagInference: true, PersonalTagInference: true}
 		return nil
 	default:
 		return fmt.Errorf("cannot scan %T into AccountSettings", src)
@@ -92,18 +91,20 @@ type Transaction struct {
 
 // TagBudget is a spending limit set by the user for a specific tag.
 type TagBudget struct {
-	ID     int64  `json:"id"      db:"id"`
-	UserID int64  `json:"user_id" db:"user_id"`
-	Tag    string `json:"tag"     db:"tag"`
-	Year   int    `json:"year"    db:"year"`
-	Month  int    `json:"month"   db:"month"`
-	Amount int64  `json:"amount"  db:"amount"`
+	ID        int64  `json:"id"          db:"id"`
+	UserID    int64  `json:"user_id"     db:"user_id"`
+	UserTagID int64  `json:"user_tag_id" db:"user_tag_id"`
+	Tag       string `json:"tag"         db:"-"`
+	Year      int    `json:"year"        db:"year"`
+	Month     int    `json:"month"       db:"month"`
+	Amount    int64  `json:"amount"      db:"amount"`
 }
 
-// UserTagEntry is a user-curated tag with an optional icon override.
+// UserTagEntry is a user-curated tag with optional icon and color overrides.
 type UserTagEntry struct {
-	Tag  string  `json:"tag"`
-	Icon *string `json:"icon,omitempty"`
+	Tag   string  `json:"tag"`
+	Icon  *string `json:"icon,omitempty"`
+	Color *string `json:"color,omitempty"`
 }
 
 // CreditCardStatement represents a single billing cycle for a credit card account.
@@ -147,8 +148,8 @@ type AppTagRule struct {
 	MatchType string   `json:"match_type" db:"match_type"`
 }
 
-// UserTagHistory records a user's description-to-tag and description-to-custom_description assignments learned from explicit edits.
-type UserTagHistory struct {
+// UserTagRule records a user's description-to-tag and description-to-custom_description assignments learned from explicit edits.
+type UserTagRule struct {
 	ID                int64     `json:"id"                 db:"id"`
 	UserID            int64     `json:"user_id"            db:"user_id"`
 	DescriptionKey    string    `json:"description_key"    db:"description_key"`

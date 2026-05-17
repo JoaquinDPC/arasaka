@@ -23,8 +23,8 @@ func (r *reportRepo) MonthlyTotals(ctx context.Context, year, month int, account
 			COALESCE(SUM(CASE WHEN flow = 'EXPENSE' THEN amount ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN flow = 'INVEST'  THEN amount ELSE 0 END), 0)
 		FROM transactions
-		WHERE EXTRACT(YEAR FROM date) = $1
-		  AND EXTRACT(MONTH FROM date) = $2
+		WHERE date >= make_date($1::int, $2::int, 1)
+		  AND date <  make_date($1::int, $2::int, 1) + interval '1 month'
 		  AND ($3::bigint IS NULL OR account_id = $3)
 	`, year, month, accountID).Scan(&income, &expenses, &investments)
 	return
@@ -36,15 +36,15 @@ func (r *reportRepo) TagTotals(ctx context.Context, year, month int, accountID *
 		SELECT
 			t.tag,
 			SUM(tr.amount) AS total,
-			COALESCE(
-				(SELECT amount FROM tag_budgets WHERE tag = t.tag AND year = $1 AND month = $2),
-				(SELECT amount FROM tag_budgets WHERE tag = t.tag AND year = $1 AND month = 0),
-				0
-			) AS budget,
+			COALESCE(MAX(tb_m.amount), MAX(tb_d.amount), 0) AS budget,
 			COUNT(*) AS cnt
-		FROM transactions tr, unnest(tr.tags) AS t(tag)
-		WHERE EXTRACT(YEAR FROM tr.date) = $1
-		  AND EXTRACT(MONTH FROM tr.date) = $2
+		FROM transactions tr
+		CROSS JOIN LATERAL unnest(tr.tags) AS t(tag)
+		LEFT JOIN user_tags ut_b ON ut_b.tag = t.tag
+		LEFT JOIN tag_budgets tb_m ON tb_m.user_tag_id = ut_b.id AND tb_m.year = $1 AND tb_m.month = $2
+		LEFT JOIN tag_budgets tb_d ON tb_d.user_tag_id = ut_b.id AND tb_d.year = $1 AND tb_d.month = 0
+		WHERE tr.date >= make_date($1::int, $2::int, 1)
+		  AND tr.date <  make_date($1::int, $2::int, 1) + interval '1 month'
 		  AND tr.flow = 'EXPENSE'
 		  AND ($3::bigint IS NULL OR tr.account_id = $3)
 		GROUP BY t.tag
@@ -76,8 +76,8 @@ func (r *reportRepo) TopExpenses(ctx context.Context, year, month, limit int, ac
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, date, description, flow, amount, source, created_at, updated_at
 		FROM transactions
-		WHERE EXTRACT(YEAR FROM date) = $1
-		  AND EXTRACT(MONTH FROM date) = $2
+		WHERE date >= make_date($1::int, $2::int, 1)
+		  AND date <  make_date($1::int, $2::int, 1) + interval '1 month'
 		  AND flow = 'EXPENSE'
 		  AND ($4::bigint IS NULL OR account_id = $4)
 		ORDER BY amount DESC
@@ -108,7 +108,8 @@ func (r *reportRepo) YearlyKPIs(ctx context.Context, year int, accountID *int64)
 			COALESCE(SUM(CASE WHEN flow = 'EXPENSE' THEN amount ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN flow = 'INVEST'  THEN amount ELSE 0 END), 0)
 		FROM transactions
-		WHERE EXTRACT(YEAR FROM date) = $1
+		WHERE date >= make_date($1::int, 1, 1)
+		  AND date <  make_date($1::int, 1, 1) + interval '1 year'
 		  AND ($2::bigint IS NULL OR account_id = $2)
 	`, year, accountID).Scan(&opening, &income, &expenses, &investments)
 	return
@@ -121,7 +122,8 @@ func (r *reportRepo) MonthlyTrend(ctx context.Context, year int, accountID *int6
 			COALESCE(SUM(CASE WHEN flow = 'INCOME'  THEN amount ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN flow = 'EXPENSE' THEN amount ELSE 0 END), 0)
 		FROM transactions
-		WHERE EXTRACT(YEAR FROM date) = $1
+		WHERE date >= make_date($1::int, 1, 1)
+		  AND date <  make_date($1::int, 1, 1) + interval '1 year'
 		  AND ($2::bigint IS NULL OR account_id = $2)
 		GROUP BY EXTRACT(MONTH FROM date)
 		ORDER BY 1 ASC
@@ -159,8 +161,8 @@ func (r *reportRepo) MonthlyHistory(ctx context.Context, year, beforeMonth int, 
 			COALESCE(SUM(CASE WHEN flow = 'INCOME'  THEN amount ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN flow = 'EXPENSE' THEN amount ELSE 0 END), 0)
 		FROM transactions
-		WHERE EXTRACT(YEAR FROM date) = $1
-		  AND EXTRACT(MONTH FROM date) < $2
+		WHERE date >= make_date($1::int, 1, 1)
+		  AND date <  make_date($1::int, $2::int, 1)
 		  AND ($3::bigint IS NULL OR account_id = $3)
 		GROUP BY EXTRACT(MONTH FROM date)
 		ORDER BY 1 ASC
@@ -186,15 +188,15 @@ func (r *reportRepo) MonthlyHistory(ctx context.Context, year, beforeMonth int, 
 			SELECT
 				t.tag,
 				SUM(tr.amount),
-				COALESCE(
-					(SELECT amount FROM tag_budgets WHERE tag = t.tag AND year = $1 AND month = $2),
-					(SELECT amount FROM tag_budgets WHERE tag = t.tag AND year = $1 AND month = 0),
-					0
-				),
+				COALESCE(MAX(tb_m.amount), MAX(tb_d.amount), 0),
 				COUNT(*)
-			FROM transactions tr, unnest(tr.tags) AS t(tag)
-			WHERE EXTRACT(YEAR FROM tr.date) = $1
-			  AND EXTRACT(MONTH FROM tr.date) = $2
+			FROM transactions tr
+			CROSS JOIN LATERAL unnest(tr.tags) AS t(tag)
+			LEFT JOIN user_tags ut_b ON ut_b.tag = t.tag
+			LEFT JOIN tag_budgets tb_m ON tb_m.user_tag_id = ut_b.id AND tb_m.year = $1 AND tb_m.month = $2
+			LEFT JOIN tag_budgets tb_d ON tb_d.user_tag_id = ut_b.id AND tb_d.year = $1 AND tb_d.month = 0
+			WHERE tr.date >= make_date($1::int, $2::int, 1)
+			  AND tr.date <  make_date($1::int, $2::int, 1) + interval '1 month'
 			  AND tr.flow = 'EXPENSE'
 			  AND ($3::bigint IS NULL OR tr.account_id = $3)
 			GROUP BY t.tag
@@ -226,7 +228,8 @@ func (r *reportRepo) YearlyTagTotals(ctx context.Context, year int, accountID *i
 			SUM(tr.amount) AS total,
 			COUNT(*)       AS cnt
 		FROM transactions tr, unnest(tr.tags) AS t(tag)
-		WHERE EXTRACT(YEAR FROM tr.date) = $1
+		WHERE tr.date >= make_date($1::int, 1, 1)
+		  AND tr.date <  make_date($1::int, 1, 1) + interval '1 year'
 		  AND tr.flow = 'EXPENSE'
 		  AND ($2::bigint IS NULL OR tr.account_id = $2)
 		GROUP BY t.tag
@@ -255,7 +258,8 @@ func (r *reportRepo) YearlyTopExpenses(ctx context.Context, year, limit int, acc
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, date, description, flow, amount, source, created_at, updated_at
 		FROM transactions
-		WHERE EXTRACT(YEAR FROM date) = $1
+		WHERE date >= make_date($1::int, 1, 1)
+		  AND date <  make_date($1::int, 1, 1) + interval '1 year'
 		  AND flow = 'EXPENSE'
 		  AND ($3::bigint IS NULL OR account_id = $3)
 		ORDER BY amount DESC
