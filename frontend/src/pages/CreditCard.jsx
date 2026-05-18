@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAccount } from '../context/AccountContext'
+import { getCatColor } from '../lib/constants'
 
 const NATIONAL_ID = 'credit_card_nacional_facturados'
 const INTL_ID     = 'credit_card_internacional_facturados'
@@ -9,10 +10,10 @@ const INTL_ID     = 'credit_card_internacional_facturados'
 // ── Formatting ────────────────────────────────────────────────────────────
 
 function fmtCLP(n) {
-  return `$ ${Math.abs(n).toLocaleString('es-CL')}`
+  return `$ ${Math.abs(n).toLocaleString('es-CL')}`
 }
 function fmtUSD(cents) {
-  return `US$ ${(Math.abs(cents) / 100).toFixed(2)}`
+  return `US$ ${(Math.abs(cents) / 100).toFixed(2)}`
 }
 function fmt(amount, currency) {
   return currency === 'USD' ? fmtUSD(amount) : fmtCLP(amount)
@@ -28,6 +29,121 @@ const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
 function periodLabel(isoDate) {
   const [y, m] = isoDate.slice(0, 10).split('-')
   return `${MONTHS_ES[parseInt(m, 10) - 1]} ${y}`
+}
+
+function inPeriod(itemDate, periodFrom, periodTo) {
+  if (!itemDate || !periodFrom || !periodTo) return true
+  const d  = itemDate.slice(0, 10)
+  const pf = periodFrom.slice(0, 10)
+  const pt = periodTo.slice(0, 10)
+  return d >= pf && d <= pt
+}
+
+// ── Billing window ────────────────────────────────────────────────────────
+
+function currentBillingWindow(allStmts) {
+  const today = new Date().toISOString().slice(0, 10)
+  if (!allStmts || allStmts.length === 0) {
+    const d = new Date(); d.setDate(d.getDate() - 45)
+    return { from: d.toISOString().slice(0, 10), to: today }
+  }
+  const lastCut = allStmts[0].period_to.slice(0, 10)
+  const next = new Date(lastCut); next.setDate(next.getDate() + 1)
+  return { from: next.toISOString().slice(0, 10), to: today }
+}
+
+// ── Current period movements ──────────────────────────────────────────────
+
+function CurrentPeriodMovements({ transactions, billingWindow, ccAccount }) {
+  if (!ccAccount) return null
+
+  const total = transactions.reduce((s, t) => {
+    return t.flow === 'INCOME' ? s - t.amount : s + t.amount
+  }, 0)
+
+  const sectionLabel = {
+    fontSize: 10, fontWeight: 700, letterSpacing: '0.07em',
+    textTransform: 'uppercase', color: 'var(--text-muted)',
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+        <div>
+          <div style={{ ...sectionLabel, marginBottom: 4 }}>Movimientos del período</div>
+          <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text-dim)' }}>
+            {fmtDate(billingWindow?.from)} – hoy
+          </div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: 20, fontFamily: 'var(--mono)', fontWeight: 700, color: total > 0 ? 'var(--red)' : 'var(--text)', lineHeight: 1 }}>
+            {fmtCLP(total)}
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 3 }}>{transactions.length} movimiento{transactions.length !== 1 ? 's' : ''}</div>
+        </div>
+      </div>
+
+      {transactions.length === 0 ? (
+        <div style={{ padding: '16px 0', textAlign: 'center' }}>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>Sin movimientos registrados en este período</div>
+          <Link
+            to="/movimientos"
+            style={{ fontSize: 12, color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}
+          >
+            Agregar en Ledger →
+          </Link>
+        </div>
+      ) : (
+        <>
+          {transactions.map(t => {
+            const isIncome = t.flow === 'INCOME'
+            const desc = t.custom_description || t.description
+            return (
+              <div
+                key={t.id}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: '1px solid var(--border)' }}
+              >
+                <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text-dim)', flexShrink: 0, minWidth: 42 }}>
+                  {fmtDate(t.date)}
+                </span>
+                <span style={{ flex: 1, fontSize: 13, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {desc}
+                </span>
+                {t.tags && t.tags.length > 0 && (
+                  <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                    {t.tags.slice(0, 2).map(tag => {
+                      const c = getCatColor(tag)
+                      return (
+                        <span key={tag} style={{
+                          fontSize: 9, fontWeight: 700, letterSpacing: '.04em',
+                          padding: '1px 5px', borderRadius: 4,
+                          background: c + '28', border: `1px solid ${c}44`,
+                          color: c,
+                        }}>
+                          {tag}
+                        </span>
+                      )
+                    })}
+                  </div>
+                )}
+                <span style={{
+                  fontSize: 13, fontFamily: 'var(--mono)', fontWeight: 600, flexShrink: 0,
+                  color: isIncome ? 'var(--green)' : 'var(--red)',
+                }}>
+                  {isIncome ? '+' : '-'}{fmtCLP(t.amount)}
+                </span>
+              </div>
+            )
+          })}
+          <div style={{ marginTop: 10, textAlign: 'right' }}>
+            <Link to="/movimientos" style={{ fontSize: 11, color: 'var(--text-dim)', textDecoration: 'none' }}>
+              Agregar en Ledger →
+            </Link>
+          </div>
+        </>
+      )}
+    </div>
+  )
 }
 
 // ── Period navigator ──────────────────────────────────────────────────────
@@ -120,12 +236,13 @@ function SummaryBar({ stmts }) {
 // ── Installment row ───────────────────────────────────────────────────────
 
 function InstallmentRow({ it, currency }) {
-  const current    = it.installment_current ?? 1
-  const total      = it.installment_total   ?? 1
-  const origAmount = it.amount                        // total purchase price from PDF
-  const monthlyAmt = Math.round(origAmount / total)  // cuota mensual
-  const paidAmount = monthlyAmt * current
-  const pct        = Math.round((current / total) * 100)
+  const cur      = it.installment_current ?? 1
+  const total    = it.installment_total   ?? 1
+  const origAmt  = it.amount
+  const monthly  = Math.round(origAmt / total)
+  const paid     = monthly * cur
+  const pct      = Math.round((cur / total) * 100)
+  const remaining = total - cur
 
   return (
     <div style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
@@ -135,15 +252,18 @@ function InstallmentRow({ it, currency }) {
             {it.description}
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--mono)', marginTop: 3 }}>
-            {fmtDate(it.date)} · Compra {fmt(origAmount, currency)}
+            {fmtDate(it.date)} · Compra {fmt(origAmt, currency ?? it.currency)}
+            {remaining > 0 && (
+              <span style={{ marginLeft: 8, color: 'var(--text-muted)' }}>· {remaining} cuota{remaining !== 1 ? 's' : ''} restante{remaining !== 1 ? 's' : ''}</span>
+            )}
           </div>
         </div>
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
           <div style={{ fontSize: 13, fontFamily: 'var(--mono)', fontWeight: 600, color: 'var(--accent)' }}>
-            {fmt(monthlyAmt, currency)}<span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>/mes</span>
+            {fmt(monthly, currency ?? it.currency)}<span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>/mes</span>
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--mono)', marginTop: 2 }}>
-            {fmt(paidAmount, currency)} de {fmt(origAmount, currency)}
+            {fmt(paid, currency ?? it.currency)} de {fmt(origAmt, currency ?? it.currency)}
           </div>
         </div>
       </div>
@@ -152,9 +272,76 @@ function InstallmentRow({ it, currency }) {
           <div style={{ height: '100%', width: `${pct}%`, background: 'var(--accent)', borderRadius: 2, transition: 'width .4s ease' }} />
         </div>
         <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--text-dim)', flexShrink: 0 }}>
-          {current}/{total}
+          {cur}/{total}
         </span>
       </div>
+    </div>
+  )
+}
+
+// ── Active installments panel ─────────────────────────────────────────────
+
+function ActiveInstallmentsPanel({ items }) {
+  const [open, setOpen] = useState(true)
+  if (!items || items.length === 0) return null
+
+  const sorted = [...items].sort((a, b) => {
+    const ra = (a.installment_total ?? 1) - (a.installment_current ?? 1)
+    const rb = (b.installment_total ?? 1) - (b.installment_current ?? 1)
+    return rb - ra
+  })
+
+  const clpItems = sorted.filter(it => it.currency !== 'USD')
+  const usdItems = sorted.filter(it => it.currency === 'USD')
+
+  const totalMonthlyCLP = clpItems.reduce((s, it) => {
+    return s + Math.round(it.amount / (it.installment_total ?? 1))
+  }, 0)
+  const totalMonthlyUSD = usdItems.reduce((s, it) => {
+    return s + Math.round(it.amount / (it.installment_total ?? 1))
+  }, 0)
+
+  return (
+    <div className="card" style={{ marginBottom: 20, borderColor: 'rgba(201,168,76,.18)' }}>
+      <div
+        onClick={() => setOpen(v => !v)}
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--accent)' }}>
+            Cuotas activas
+          </span>
+          <span style={{
+            fontSize: 9, fontWeight: 700, letterSpacing: '.04em',
+            padding: '1px 6px', borderRadius: 4,
+            background: 'rgba(201,168,76,.12)', border: '1px solid rgba(201,168,76,.25)',
+            color: 'var(--accent)', fontFamily: 'var(--mono)',
+          }}>
+            {items.length}
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          {totalMonthlyCLP > 0 && (
+            <span style={{ fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--text-muted)' }}>
+              {fmtCLP(totalMonthlyCLP)}<span style={{ color: 'var(--text-dim)', fontSize: 10 }}>/mes</span>
+            </span>
+          )}
+          {totalMonthlyUSD > 0 && (
+            <span style={{ fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--text-muted)' }}>
+              {fmtUSD(totalMonthlyUSD)}<span style={{ color: 'var(--text-dim)', fontSize: 10 }}>/mes</span>
+            </span>
+          )}
+          <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>{open ? '▾' : '▸'}</span>
+        </div>
+      </div>
+
+      {open && (
+        <div style={{ marginTop: 12 }}>
+          {sorted.map(it => (
+            <InstallmentRow key={it.id} it={it} currency={it.currency} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -175,7 +362,7 @@ function StatementCard({ stmt }) {
     const tot = it.installment_total ?? 1
     return s + Math.round(it.amount / tot) * (it.installment_current ?? 1)
   }, 0)
-  const totalInstOrig = installments.reduce((s, it) => s + it.amount, 0)
+  const totalInstOrig    = installments.reduce((s, it) => s + it.amount, 0)
   const totalPurchases   = purchases.reduce((s, it) => s + it.amount, 0)
   const totalCommissions = commissions.reduce((s, it) => s + it.amount, 0)
 
@@ -184,35 +371,58 @@ function StatementCard({ stmt }) {
     textTransform: 'uppercase', color: 'var(--text-muted)',
   }
 
+  const metaLabel = {
+    fontSize: 10, fontWeight: 600, letterSpacing: '0.06em',
+    textTransform: 'uppercase', color: 'var(--text-muted)',
+  }
+
+  const metaValue = {
+    fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text)',
+  }
+
+  const antBadge = {
+    fontSize: 9, fontWeight: 700, letterSpacing: '.04em',
+    padding: '1px 5px', borderRadius: 4, flexShrink: 0,
+    background: 'rgba(136,136,143,.08)', border: '1px solid rgba(136,136,143,.2)',
+    color: 'var(--text-muted)',
+  }
+
   return (
     <div className="card" style={{ borderColor: isIntl ? 'rgba(155,127,212,.25)' : 'rgba(201,168,76,.18)' }}>
 
       {/* Header */}
       <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: accent, marginBottom: 8 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: accent, marginBottom: 10 }}>
           {label}
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 20 }}>
+          {/* Total amount */}
           <div>
             <div style={{ fontSize: 28, fontFamily: 'var(--mono)', fontWeight: 700, color: 'var(--text)', lineHeight: 1 }}>
               {fmt(stmt.total_amount, stmt.currency)}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--mono)', marginTop: 6 }}>
-              {fmtDate(stmt.period_from)} – {fmtDate(stmt.period_to)}
-            </div>
           </div>
-          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+
+          {/* Billing cycle metadata */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto auto', gap: '4px 16px', alignItems: 'center' }}>
+            <span style={metaLabel}>Período</span>
+            <span style={metaValue}>{fmtDate(stmt.period_from)} – {fmtDate(stmt.period_to)}</span>
+
+            <span style={metaLabel}>Corte</span>
+            <span style={{ ...metaValue, color: accent }}>{fmtDate(stmt.period_to)}</span>
+
             {stmt.due_date && (
-              <div style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 10, color: 'var(--text-dim)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 2 }}>Vence</div>
-                <div style={{ fontSize: 13, fontFamily: 'var(--mono)', fontWeight: 600, color: accent }}>{fmtDate(stmt.due_date)}</div>
-              </div>
+              <>
+                <span style={metaLabel}>Vence</span>
+                <span style={{ ...metaValue, fontWeight: 600, color: accent }}>{fmtDate(stmt.due_date)}</span>
+              </>
             )}
             {stmt.min_payment > 0 && (
-              <div>
-                <div style={{ fontSize: 10, color: 'var(--text-dim)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 2 }}>Pago mínimo</div>
-                <div style={{ fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--text-muted)' }}>{fmt(stmt.min_payment, stmt.currency)}</div>
-              </div>
+              <>
+                <span style={metaLabel}>Pago mín.</span>
+                <span style={{ ...metaValue, color: 'var(--text-muted)' }}>{fmt(stmt.min_payment, stmt.currency)}</span>
+              </>
             )}
           </div>
         </div>
@@ -240,15 +450,19 @@ function StatementCard({ stmt }) {
             <span style={sectionLabel}>Compras ({purchases.length})</span>
             <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text-muted)' }}>{fmt(totalPurchases, stmt.currency)}</span>
           </div>
-          {purchases.map(it => (
-            <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>
-                <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text-dim)', flexShrink: 0 }}>{fmtDate(it.date)}</span>
-                <span style={{ fontSize: 13, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.description}</span>
+          {purchases.map(it => {
+            const outside = !inPeriod(it.date, stmt.period_from, stmt.period_to)
+            return (
+              <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>
+                  <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text-dim)', flexShrink: 0 }}>{fmtDate(it.date)}</span>
+                  {outside && <span style={antBadge}>◂ ant.</span>}
+                  <span style={{ fontSize: 13, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.description}</span>
+                </div>
+                <span style={{ fontSize: 13, fontFamily: 'var(--mono)', fontWeight: 600, color: 'var(--text)', flexShrink: 0 }}>{fmt(it.amount, it.currency)}</span>
               </div>
-              <span style={{ fontSize: 13, fontFamily: 'var(--mono)', fontWeight: 600, color: 'var(--text)', flexShrink: 0 }}>{fmt(it.amount, it.currency)}</span>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
@@ -259,12 +473,18 @@ function StatementCard({ stmt }) {
             <span style={{ ...sectionLabel, color: 'var(--red)' }}>Cargos adicionales</span>
             <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--red)' }}>{fmt(totalCommissions, stmt.currency)}</span>
           </div>
-          {commissions.map(it => (
-            <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
-              <span style={{ fontSize: 13, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.description}</span>
-              <span style={{ fontSize: 13, fontFamily: 'var(--mono)', fontWeight: 600, color: 'var(--red)', flexShrink: 0 }}>{fmt(it.amount, it.currency)}</span>
-            </div>
-          ))}
+          {commissions.map(it => {
+            const outside = !inPeriod(it.date, stmt.period_from, stmt.period_to)
+            return (
+              <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 0 }}>
+                  {outside && <span style={antBadge}>◂ ant.</span>}
+                  <span style={{ fontSize: 13, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.description}</span>
+                </div>
+                <span style={{ fontSize: 13, fontFamily: 'var(--mono)', fontWeight: 600, color: 'var(--red)', flexShrink: 0 }}>{fmt(it.amount, it.currency)}</span>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
@@ -392,20 +612,41 @@ function ImportPanel({ onImported }) {
 export default function CreditCard() {
   const [searchParams] = useSearchParams()
 
-  const [allStmts, setAllStmts]       = useState([])
-  const [periods, setPeriods]         = useState([])
-  const [selectedPeriod, setSelected] = useState(null)
-  const [stmtsWithItems, setWithItems] = useState([])
-  const [summaryStmts, setSummaryStmts] = useState([])
-  const [loading, setLoading]         = useState(true)
-  const [error, setError]             = useState(null)
+  const [allStmts, setAllStmts]           = useState([])
+  const [periods, setPeriods]             = useState([])
+  const [selectedPeriod, setSelected]     = useState(null)
+  const [stmtsWithItems, setWithItems]    = useState([])
+  const [summaryStmts, setSummaryStmts]   = useState([])
+  const [activeInstallments, setActiveInstallments] = useState([])
+  const [ccTransactions, setCCTransactions] = useState([])
+  const [billingWindow, setBillingWindow] = useState(null)
+  const [loading, setLoading]             = useState(true)
+  const [error, setError]                 = useState(null)
+
+  const { accounts } = useAccount()
+  const ccAccount = accounts?.find(a => a.type === 'Tarjeta de crédito') ?? null
 
   async function loadAll() {
     setLoading(true)
     setError(null)
     try {
-      const list = await api.ccStatements()
+      const [list, installs] = await Promise.all([
+        api.ccStatements(),
+        api.installments(),
+      ])
       setAllStmts(list ?? [])
+      setActiveInstallments(installs ?? [])
+
+      const win = currentBillingWindow(list ?? [])
+      setBillingWindow(win)
+      if (ccAccount) {
+        const txns = await api.transactions({
+          account_id: ccAccount.id,
+          date_from: win.from,
+          date_to: win.to,
+        })
+        setCCTransactions(Array.isArray(txns) ? txns : (txns?.transactions ?? []))
+      }
 
       const seen = new Set()
       const ps = []
@@ -449,7 +690,7 @@ export default function CreditCard() {
       {/* Page header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--text)', margin: 0 }}>Tarjeta de Crédito</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--text)', margin: 0 }}>Movimientos Tarjeta de Crédito</h1>
           {periods.length > 1 && selectedPeriod && (
             <PeriodNav periods={periods} selected={selectedPeriod} onChange={setSelected} />
           )}
@@ -468,6 +709,18 @@ export default function CreditCard() {
           <h3>Sin estados de cuenta</h3>
           <p>Importa un PDF para comenzar.</p>
         </div>
+      )}
+
+      {/* Active installments — global, not period-dependent */}
+      {!loading && <ActiveInstallmentsPanel items={activeInstallments} />}
+
+      {/* Current period transactions — from transactions table */}
+      {!loading && (
+        <CurrentPeriodMovements
+          transactions={ccTransactions}
+          billingWindow={billingWindow}
+          ccAccount={ccAccount}
+        />
       )}
 
       {/* Summary bar */}

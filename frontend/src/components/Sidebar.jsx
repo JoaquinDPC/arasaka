@@ -60,7 +60,7 @@ const NAV_ITEMS = [
   { to: '/anual',        label: 'Anual',        icon: '◈' },
   { to: '/categorias',   label: 'Categorías',   icon: '◧' },
   { to: '/movimientos',  label: 'Movimientos',  icon: '≡' },
-  { to: '/tarjeta',      label: 'Tarjeta',      icon: '◉' },
+  { to: '/tarjeta',      label: 'Mov. Tarjeta',  icon: '◉' },
   { to: '/cuentas',      label: 'Cuentas',      icon: '◎' },
   { to: '/deudas',       label: 'Deudas',       icon: '⇄' },
   { to: '/importar',     label: 'Importar',     icon: '↑' },
