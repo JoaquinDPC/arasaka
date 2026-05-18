@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"arasaka/internal/crypto"
 	"arasaka/internal/domain"
 	"arasaka/internal/importer"
 	"arasaka/internal/pdfparser"
@@ -47,11 +48,13 @@ type BatchResult struct {
 type ImportService struct {
 	db           *sql.DB
 	inferenceSvc *TagInferenceService
+	ccRepo       domain.CreditCardRepository
+	masterKey    []byte
 }
 
 // NewImportService creates a new ImportService.
-func NewImportService(db *sql.DB, inferenceSvc *TagInferenceService) *ImportService {
-	return &ImportService{db: db, inferenceSvc: inferenceSvc}
+func NewImportService(db *sql.DB, inferenceSvc *TagInferenceService, ccRepo domain.CreditCardRepository, masterKey []byte) *ImportService {
+	return &ImportService{db: db, inferenceSvc: inferenceSvc, ccRepo: ccRepo, masterKey: masterKey}
 }
 
 // ImportPDFs validates ownership and bank support once, then processes each PDF
@@ -90,8 +93,7 @@ func (s *ImportService) ImportPDFs(ctx context.Context, userID, accountID int64,
 	return result, nil
 }
 
-// importOne parses a single PDF and inserts its rows. Errors are captured in the
-// FileResult instead of propagating, so sibling files can still be processed.
+// importOne dispatches to the bank-specific import path based on bank ID and PDF content.
 func (s *ImportService) importOne(
 	ctx context.Context,
 	txRepo domain.TransactionRepository,
@@ -100,10 +102,55 @@ func (s *ImportService) importOne(
 	accountSettings domain.AccountSettings,
 	f NamedPDF,
 ) FileResult {
+	switch bankID {
+	case domain.BankBancoDeChile:
+		docType, encrypted, err := pdfparser.DetectBancoChilePDF(f.Data)
+		if err != nil {
+			return FileResult{Filename: f.Filename, Error: fmt.Sprintf("detect pdf: %s", err)}
+		}
+		data := f.Data
+		if encrypted {
+			plain, err := s.decryptAccountPDF(accountSettings)
+			if err != nil {
+				return FileResult{Filename: f.Filename, Error: err.Error()}
+			}
+			data, err = decryptPDF(f.Data, plain)
+			if err != nil {
+				return FileResult{Filename: f.Filename, Error: fmt.Sprintf("decrypt pdf: %s", err)}
+			}
+			docType, _, err = pdfparser.DetectBancoChilePDF(data)
+			if err != nil {
+				return FileResult{Filename: f.Filename, Error: fmt.Sprintf("detect decrypted pdf: %s", err)}
+			}
+		}
+		decoded := NamedPDF{Filename: f.Filename, Data: data}
+		switch docType {
+		case "credit_card":
+			return s.importOneCC(ctx, userID, accountID, decoded)
+		case "debit":
+			return s.importOneDebit(ctx, txRepo, userID, accountID, accountSettings, decoded, pdfparser.ParseBancoChile)
+		default:
+			return FileResult{Filename: f.Filename, Error: "unrecognized Banco de Chile PDF format"}
+		}
+	case domain.BankSantander:
+		return s.importOneDebit(ctx, txRepo, userID, accountID, accountSettings, f, pdfparser.ParseSantander)
+	default:
+		return FileResult{Filename: f.Filename, Error: fmt.Sprintf("no PDF parser for bank %q", bankID)}
+	}
+}
+
+// importOneDebit parses a debit cartola PDF and inserts the resulting transactions.
+func (s *ImportService) importOneDebit(
+	ctx context.Context,
+	txRepo domain.TransactionRepository,
+	userID, accountID int64,
+	accountSettings domain.AccountSettings,
+	f NamedPDF,
+	parseFn func([]byte) (pdfparser.ParseResult, error),
+) FileResult {
 	fr := FileResult{Filename: f.Filename}
 
-	// ── Parse ─────────────────────────────────────────────────────────────────
-	parsed, err := parsePDF(bankID, f.Data)
+	parsed, err := parseFn(f.Data)
 	if err != nil {
 		fr.Error = fmt.Sprintf("parse error: %s", err)
 		return fr
@@ -113,7 +160,6 @@ func (s *ImportService) importOne(
 		return fr
 	}
 
-	// ── Map rows to CreateTransactionParams ──────────────────────────────────
 	var params []domain.CreateTransactionParams
 	for _, row := range parsed.Rows {
 		rawID := importer.PDFRawID(accountID, row.Date, row.Amount, row.Description)
@@ -132,12 +178,10 @@ func (s *ImportService) importOne(
 		})
 	}
 
-	// ── Apply app-level tag inference before insert ───────────────────────────
 	if s.inferenceSvc != nil {
 		params = s.inferenceSvc.AutoTagBatch(ctx, userID, accountSettings, params)
 	}
 
-	// ── Insert (dedup-safe via ON CONFLICT transactions_dedup) ────────────────
 	imported, dupes, err := txRepo.CreateBatch(ctx, params)
 	if err != nil {
 		fr.Error = fmt.Sprintf("insert error: %s", err)
@@ -155,14 +199,88 @@ func (s *ImportService) importOne(
 	return fr
 }
 
-// parsePDF dispatches to the bank-specific parser.
-func parsePDF(bankID domain.BankID, data []byte) (pdfparser.ParseResult, error) {
-	switch bankID {
-	case domain.BankSantander:
-		return pdfparser.ParseSantander(data)
-	case domain.BankBancoDeChile:
-		return pdfparser.ParseBancoChile(data)
-	default:
-		return pdfparser.ParseResult{}, fmt.Errorf("no PDF parser for bank %q", bankID)
+// decryptAccountPDF retrieves and decrypts the PDF password stored in account settings.
+// Returns an error if no password is configured or decryption fails.
+func (s *ImportService) decryptAccountPDF(settings domain.AccountSettings) (string, error) {
+	if settings.PDFPassword == "" {
+		return "", fmt.Errorf("PDF is encrypted: no password configured for this account")
 	}
+	plain, err := crypto.Decrypt(settings.PDFPassword, s.masterKey)
+	if err != nil {
+		return "", fmt.Errorf("decrypt stored password: %w", err)
+	}
+	return plain, nil
+}
+
+// importOneCC parses a Banco de Chile credit card statement PDF and persists
+// the resulting CC statements and line items.
+func (s *ImportService) importOneCC(ctx context.Context, userID, accountID int64, f NamedPDF) FileResult {
+	fr := FileResult{Filename: f.Filename}
+
+	result, err := pdfparser.ParseCCBancoChile(f.Data)
+	if err != nil {
+		fr.Error = fmt.Sprintf("parse error: %s", err)
+		return fr
+	}
+
+	aid := accountID
+	uid := userID
+
+	for _, section := range []*pdfparser.CCStatementData{result.National, result.International} {
+		if section == nil || section.PeriodFrom.IsZero() {
+			continue
+		}
+
+		stmt, err := s.ccRepo.UpsertStatement(ctx, domain.CreateCCStatementParams{
+			ExternalAccountID: section.ExternalAccountID,
+			PeriodFrom:        section.PeriodFrom,
+			PeriodTo:          section.PeriodTo,
+			DueDate:           section.DueDate,
+			Currency:          section.Currency,
+			TotalAmount:       section.TotalAmount,
+			AccountID:         &aid,
+			UserID:            &uid,
+		})
+		if err != nil {
+			fr.Error = fmt.Sprintf("upsert statement %s: %s", section.ExternalAccountID, err)
+			return fr
+		}
+
+		var itemParams []domain.CreateCCItemParams
+		for _, it := range section.Items {
+			itemParams = append(itemParams, domain.CreateCCItemParams{
+				StatementID:        stmt.ID,
+				Date:               it.Date,
+				Description:        it.Description,
+				Amount:             it.Amount,
+				Currency:           it.Currency,
+				InstallmentCurrent: it.InstallmentCurrent,
+				InstallmentTotal:   it.InstallmentTotal,
+				ItemType:           it.ItemType,
+				BankRawID:          it.BankRawID,
+				AccountID:          &aid,
+				UserID:             &uid,
+			})
+		}
+
+		if len(itemParams) > 0 {
+			imp, dup, err := s.ccRepo.CreateItemsBatch(ctx, itemParams)
+			if err != nil {
+				fr.Error = fmt.Sprintf("create items %s: %s", section.ExternalAccountID, err)
+				return fr
+			}
+			fr.Imported += imp
+			fr.Duplicates += dup
+		}
+
+		// Use national section period; fall back to international if national absent.
+		if fr.PeriodFrom == nil && !section.PeriodFrom.IsZero() {
+			fr.PeriodFrom = &section.PeriodFrom
+		}
+		if fr.PeriodTo == nil && !section.PeriodTo.IsZero() {
+			fr.PeriodTo = &section.PeriodTo
+		}
+	}
+
+	return fr
 }

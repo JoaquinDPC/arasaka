@@ -414,12 +414,10 @@ Each log line includes: `method`, `path`, `status`, `latency`.
 ```
 backend/
 ├── cmd/
-│   ├── server/
-│   │   ├── main.go        # entry point, wiring
-│   │   ├── server.go      # route registration
-│   │   └── db.go          # DB connection + goose migrations
-│   ├── dump_pdf/          # CLI tool: dump PDF text elements
-│   └── import_excel/      # CLI tool: import from Excel
+│   └── server/
+│       ├── main.go        # entry point, wiring
+│       ├── server.go      # route registration
+│       └── db.go          # DB connection + goose migrations
 │
 ├── internal/
 │   ├── config/            # YAML config loader + validation

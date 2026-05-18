@@ -67,18 +67,6 @@ func main() {
 	tagHistoryRepo := repository.NewUserTagRuleRepository(db)
 	ccRepo := repository.NewCreditCardRepository(db)
 
-	// ── Services (business logic) ──────────────────────────────────────────────────────────
-	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
-	accountSvc := service.NewAccountService(accountRepo)
-	budgetSvc := service.NewBudgetService(userTagRepo, tagBudgetRepo)
-	adminTagRuleSvc := service.NewAdminTagRuleService(appTagRuleRepo, tagHistoryRepo)
-	inferenceSvc := service.NewTagInferenceService(appTagRuleRepo, tagHistoryRepo, accountRepo)
-	txSvc := service.NewTransactionService(txRepo, userTagRepo, inferenceSvc)
-	reportSvc := service.NewReportService(reportRepo)
-	syncSvc := service.NewSyncService(db, cfg.BancochileUser, cfg.BancochilePassword, cfg.SantanderUser, cfg.SantanderPassword, inferenceSvc, log)
-	importSvc := service.NewImportService(db, inferenceSvc)
-	ccSvc := service.NewCreditCardService(ccRepo, db)
-
 	// ── Master key for PDF password encryption ────────────────────────────────────────────────
 	var masterKey []byte
 	if cfg.MasterKey != "" {
@@ -88,6 +76,18 @@ func main() {
 			os.Exit(1)
 		}
 	}
+
+	// ── Services (business logic) ──────────────────────────────────────────────────────────
+	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
+	accountSvc := service.NewAccountService(accountRepo)
+	budgetSvc := service.NewBudgetService(userTagRepo, tagBudgetRepo)
+	adminTagRuleSvc := service.NewAdminTagRuleService(appTagRuleRepo, tagHistoryRepo)
+	inferenceSvc := service.NewTagInferenceService(appTagRuleRepo, tagHistoryRepo, accountRepo)
+	txSvc := service.NewTransactionService(txRepo, userTagRepo, inferenceSvc)
+	reportSvc := service.NewReportService(reportRepo)
+	syncSvc := service.NewSyncService(db, cfg.BancochileUser, cfg.BancochilePassword, cfg.SantanderUser, cfg.SantanderPassword, inferenceSvc, log)
+	importSvc := service.NewImportService(db, inferenceSvc, ccRepo, masterKey)
+	ccSvc := service.NewCreditCardService(ccRepo, db)
 
 	// ── Controllers (HTTP handlers) ──────────────────────────────────────────────────────────
 	ctrl := Controllers{
