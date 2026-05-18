@@ -48,6 +48,8 @@ func (ctrl *TransactionController) List(c *gin.Context) {
 		Flow:      c.Query("flow"),
 		AccountID: c.Query("account_id"),
 		Tags:      tags,
+		DateFrom:  c.Query("date_from"),
+		DateTo:    c.Query("date_to"),
 		Limit:     limit,
 	}
 	txs, err := ctrl.svc.List(c.Request.Context(), f)

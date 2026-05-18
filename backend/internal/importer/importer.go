@@ -15,6 +15,11 @@ import (
 	"arasaka/internal/repository"
 )
 
+const (
+	AccountTypeCorriente = "corriente"
+	AccountTypeCredito   = "credito"
+)
+
 // MovimientoRecord mirrors one entry in the fintself JSON output.
 type MovimientoRecord struct {
 	Date            string  `json:"date"`
@@ -83,14 +88,14 @@ func Run(ctx context.Context, db *sql.DB, records []MovimientoRecord, fromDate t
 				continue
 			}
 		}
-		if r.AccountType == "corriente" {
+		if r.AccountType == AccountTypeCorriente {
 			p, err := mapBankRecord(r, accountID, userID, bankID)
 			if err != nil {
 				logger.Warn("skip bank record", "description", r.Description, "err", err)
 				continue
 			}
 			bankParams = append(bankParams, p)
-		} else if r.AccountType == "credito" {
+		} else if r.AccountType == AccountTypeCredito {
 			ccByAccount[r.AccountID] = append(ccByAccount[r.AccountID], r)
 		}
 	}

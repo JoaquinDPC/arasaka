@@ -10,5 +10,7 @@ type TransactionFilter struct {
 	Flow      string
 	AccountID string
 	Tags      []string // AND filter: rows must contain all listed tags (tags @> ARRAY[...])
+	DateFrom  string   // inclusive lower bound: YYYY-MM-DD
+	DateTo    string   // inclusive upper bound: YYYY-MM-DD
 	Limit     int      // 0 means use default (1000)
 }

@@ -67,6 +67,16 @@ func (r *transactionRepo) List(ctx context.Context, f domain.TransactionFilter) 
 		args = append(args, pq.Array(f.Tags))
 		n++
 	}
+	if f.DateFrom != "" {
+		where += fmt.Sprintf(" AND date >= $%d", n)
+		args = append(args, f.DateFrom)
+		n++
+	}
+	if f.DateTo != "" {
+		where += fmt.Sprintf(" AND date <= $%d", n)
+		args = append(args, f.DateTo)
+		n++
+	}
 
 	limit := 2000
 	if f.Limit > 0 {

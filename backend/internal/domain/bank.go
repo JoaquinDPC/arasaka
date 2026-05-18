@@ -47,6 +47,18 @@ var ValidBankIDs = []BankID{
 	// BankOther,
 }
 
+// FintID returns the bank identifier used by the fintself CLI (e.g. "cl_banco_chile").
+func (b BankID) FintID() string {
+	switch b {
+	case BankBancoDeChile:
+		return "cl_banco_chile"
+	case BankSantander:
+		return "cl_santander"
+	default:
+		return string(b)
+	}
+}
+
 // BankLabel returns the human-readable display name for a bank_id.
 func BankLabel(bankID BankID) string {
 	switch bankID {

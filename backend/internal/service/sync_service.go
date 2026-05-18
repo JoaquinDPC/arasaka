@@ -13,6 +13,7 @@ import (
 
 	"arasaka/internal/domain"
 	"arasaka/internal/importer"
+
 	"github.com/lib/pq"
 )
 
@@ -44,19 +45,19 @@ func (s *SyncService) Sync(ctx context.Context, bankID string) (importer.Result,
 	s.logger.Info("sync started", "bank_id", bankID)
 	var combined importer.Result
 
-	if (bankID == "" || bankID == "cl_banco_chile") && s.bancochileUser != "" {
-		result, err := s.syncBank(ctx, "cl_banco_chile", s.bancochileUser, s.bancochilePassword, domain.BankBancoDeChile)
+	if (bankID == "" || bankID == domain.BankBancoDeChile.FintID()) && s.bancochileUser != "" {
+		result, err := s.syncBank(ctx, domain.BankBancoDeChile, s.bancochileUser, s.bancochilePassword)
 		if err != nil {
-			s.logger.Error("sync failed", "bank", "cl_banco_chile", "err", err)
+			s.logger.Error("sync failed", "bank", domain.BankBancoDeChile, "err", err)
 			return combined, fmt.Errorf("banco chile: %w", err)
 		}
 		combined = mergeResults(combined, result)
 	}
 
-	if (bankID == "" || bankID == "cl_santander") && s.santanderUser != "" {
-		result, err := s.syncBank(ctx, "cl_santander", s.santanderUser, s.santanderPassword, domain.BankSantander)
+	if (bankID == "" || bankID == domain.BankSantander.FintID()) && s.santanderUser != "" {
+		result, err := s.syncBank(ctx, domain.BankSantander, s.santanderUser, s.santanderPassword)
 		if err != nil {
-			s.logger.Error("sync failed", "bank", "cl_santander", "err", err)
+			s.logger.Error("sync failed", "bank", domain.BankSantander, "err", err)
 			return combined, fmt.Errorf("santander: %w", err)
 		}
 		combined = mergeResults(combined, result)
@@ -70,7 +71,7 @@ func (s *SyncService) Sync(ctx context.Context, bankID string) (importer.Result,
 	return combined, nil
 }
 
-func (s *SyncService) syncBank(ctx context.Context, bankID, user, password string, dbBankID domain.BankID) (importer.Result, error) {
+func (s *SyncService) syncBank(ctx context.Context, bankID domain.BankID, user, password string) (importer.Result, error) {
 	tmpFile, err := os.CreateTemp("", "fintself-*.json")
 	if err != nil {
 		return importer.Result{}, fmt.Errorf("create temp file: %w", err)
@@ -83,8 +84,9 @@ func (s *SyncService) syncBank(ctx context.Context, bankID, user, password strin
 	defer cancel()
 
 	// Run fintself in headed mode — Auth0 blocks headless Chrome.
-	prefix := strings.ToUpper(strings.ReplaceAll(bankID, "-", "_"))
-	cmd := exec.CommandContext(cmdCtx, "fintself", "scrape", bankID, "--output-file", tmpPath)
+	fintID := bankID.FintID()
+	prefix := strings.ToUpper(strings.ReplaceAll(fintID, "-", "_"))
+	cmd := exec.CommandContext(cmdCtx, "fintself", "scrape", fintID, "--output-file", tmpPath)
 	cmd.Env = append(os.Environ(),
 		prefix+"_USER="+user,
 		prefix+"_PASSWORD="+password,
@@ -114,7 +116,7 @@ func (s *SyncService) syncBank(ctx context.Context, bankID, user, password strin
 	var accountSettings domain.AccountSettings
 	var acctID int64
 	var nullUID sql.NullInt64
-	row := s.db.QueryRowContext(ctx, `SELECT id, user_id, settings FROM accounts WHERE bank_id = $1 LIMIT 1`, dbBankID)
+	row := s.db.QueryRowContext(ctx, `SELECT id, user_id, settings FROM accounts WHERE bank_id = $1 LIMIT 1`, bankID)
 	if err := row.Scan(&acctID, &nullUID, &accountSettings); err == nil {
 		accountID = &acctID
 		if nullUID.Valid {
@@ -136,7 +138,7 @@ func (s *SyncService) syncBank(ctx context.Context, bankID, user, password strin
 		}
 	}
 
-	result, err := importer.Run(ctx, s.db, all, fromDate, accountID, userID, s.inferenceSvc, accountSettings, dbBankID, s.logger)
+	result, err := importer.Run(ctx, s.db, all, fromDate, accountID, userID, s.inferenceSvc, accountSettings, bankID, s.logger)
 
 	// Retroactively link corriente movements that were imported before the account
 	// existed in the database (account_id IS NULL). Uses all fetched movements —
@@ -144,7 +146,7 @@ func (s *SyncService) syncBank(ctx context.Context, bankID, user, password strin
 	if accountID != nil {
 		var rawIDs []string
 		for _, r := range all {
-			if r.AccountType == "corriente" {
+			if r.AccountType == importer.AccountTypeCorriente {
 				rawIDs = append(rawIDs, importer.BankRawID(r))
 			}
 		}
