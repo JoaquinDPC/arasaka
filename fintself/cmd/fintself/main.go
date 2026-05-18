@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"math"
+	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 
-	"fintself/internal/output"
 	"fintself/internal/scraper"
 
 	// Import all bank scrapers so their init() functions register themselves.
@@ -27,8 +30,8 @@ func rootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "fintself",
 		Short: "Fintself: open-source collaborative bank transaction scraper.",
-		Long: `Fintself automates extraction of financial movements from Chilean banks.
-It exports data as XLSX, CSV, or JSON and can be used as a CLI tool or Go library.`,
+		Long: `Fintself automates extraction of financial movements from Chilean banks
+and imports them directly into the Arasaka backend.`,
 	}
 	root.AddCommand(listCmd(), scrapeCmd())
 	return root
@@ -54,40 +57,27 @@ func listCmd() *cobra.Command {
 }
 
 func scrapeCmd() *cobra.Command {
-	var outputFile string
-	var outputFormat string
-	var headless *bool
-	var debugMode *bool
-
-	headlessFlag := new(bool)
-	debugFlag := new(bool)
+	var serverURL string
+	var accountID int64
+	var token string
+	var headlessFlag = new(bool)
+	var debugFlag = new(bool)
 
 	cmd := &cobra.Command{
 		Use:   "scrape <bank_id>",
-		Short: "Executes a scraper to extract bank movements.",
+		Short: "Scrapes bank movements and imports them into the server.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			bankID := args[0]
 
-			if outputFile == "" && outputFormat == "" {
-				return fmt.Errorf("specify --output-file to save or --output-format (json|csv) to print to console")
+			if accountID == 0 {
+				return fmt.Errorf("--account-id is required")
 			}
-			if outputFile != "" && outputFormat != "" {
-				fmt.Fprintln(os.Stderr, "warning: both --output-file and --output-format given; --output-file takes precedence")
-				outputFormat = ""
-			}
-
-			fileFormat := ""
-			if outputFile != "" {
-				ext := strings.ToLower(filepath.Ext(outputFile))
-				switch ext {
-				case ".xlsx", ".csv", ".json":
-					fileFormat = strings.TrimPrefix(ext, ".")
-				default:
-					return fmt.Errorf("unsupported file extension %q; use .xlsx, .csv, or .json", ext)
-				}
+			if token == "" {
+				return fmt.Errorf("--token is required")
 			}
 
+			var headless, debugMode *bool
 			if cmd.Flags().Changed("headless") {
 				headless = headlessFlag
 			}
@@ -114,41 +104,67 @@ func scrapeCmd() *cobra.Command {
 				return nil
 			}
 
-			if outputFile != "" {
-				switch fileFormat {
-				case "xlsx":
-					err = output.SaveXLSX(movements, outputFile)
-				case "csv":
-					err = output.SaveCSV(movements, outputFile)
-				case "json":
-					err = output.SaveJSON(movements, outputFile)
-				}
-				if err != nil {
-					return err
-				}
-				fmt.Printf("Scraping completed. Data saved to %s\n", outputFile)
-				return nil
+			type txItem struct {
+				Date        string `json:"date"`
+				Description string `json:"description"`
+				Flow        string `json:"flow"`
+				Amount      int64  `json:"amount"`
+			}
+			type bulkReq struct {
+				AccountID    int64    `json:"account_id"`
+				Transactions []txItem `json:"transactions"`
 			}
 
-			var data string
-			switch outputFormat {
-			case "json":
-				data, err = output.FormatJSON(movements)
-			case "csv":
-				data, err = output.FormatCSV(movements)
-			default:
-				return fmt.Errorf("output format %q not valid; use json or csv", outputFormat)
+			items := make([]txItem, 0, len(movements))
+			for _, m := range movements {
+				flow := "EXPENSE"
+				if m.Amount >= 0 {
+					flow = "INCOME"
+				}
+				items = append(items, txItem{
+					Date:        m.Date.Format("2006-01-02"),
+					Description: m.Description,
+					Flow:        flow,
+					Amount:      int64(math.Round(math.Abs(m.Amount))),
+				})
 			}
+
+			body, err := json.Marshal(bulkReq{AccountID: accountID, Transactions: items})
 			if err != nil {
-				return err
+				return fmt.Errorf("marshal error: %w", err)
 			}
-			fmt.Print(data)
+
+			req, err := http.NewRequest(http.MethodPost, serverURL+"/api/transactions/bulk", bytes.NewReader(body))
+			if err != nil {
+				return fmt.Errorf("request error: %w", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+token)
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return fmt.Errorf("server error: %w", err)
+			}
+			defer resp.Body.Close()
+
+			respBody, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("server returned %d: %s", resp.StatusCode, respBody)
+			}
+
+			var result map[string]int
+			if err := json.Unmarshal(respBody, &result); err != nil {
+				fmt.Printf("Scraping completed. Server response: %s\n", respBody)
+				return nil
+			}
+			fmt.Printf("Imported %d, duplicates %d\n", result["imported"], result["duplicates"])
 			return nil
 		},
 	}
 
-	cmd.Flags().StringVarP(&outputFile, "output-file", "o", "", "Output file path (format inferred from extension: .xlsx, .csv, .json)")
-	cmd.Flags().StringVarP(&outputFormat, "output-format", "f", "", "Console output format if no file is given (json|csv)")
+	cmd.Flags().StringVar(&serverURL, "server-url", "http://localhost:8080", "Backend server base URL")
+	cmd.Flags().Int64Var(&accountID, "account-id", 0, "Backend account ID to import movements into")
+	cmd.Flags().StringVar(&token, "token", "", "JWT bearer token for backend authentication")
 	cmd.Flags().BoolVar(headlessFlag, "headless", false, "Run browser in headless mode (may not work with all banks)")
 	cmd.Flags().BoolVar(debugFlag, "debug", false, "Enable debug mode (saves screenshots and HTML on each step)")
 
