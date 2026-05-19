@@ -43,6 +43,7 @@ func (ctrl *TransactionController) List(c *gin.Context) {
 		}
 	}
 	f := domain.TransactionFilter{
+		UserID:    userIDFromContext(c),
 		Year:      c.Query("year"),
 		Month:     c.Query("month"),
 		Flow:      c.Query("flow"),

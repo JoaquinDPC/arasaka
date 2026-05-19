@@ -23,7 +23,8 @@ func NewReportController(svc *service.ReportService) *ReportController {
 func (ctrl *ReportController) MonthlyReport(c *gin.Context) {
 	year, month := yearMonthParams(c)
 	accountID := accountIDParam(c)
-	report, err := ctrl.svc.BuildMonthlyReport(c.Request.Context(), year, month, accountID)
+	userID := userIDFromContext(c)
+	report, err := ctrl.svc.BuildMonthlyReport(c.Request.Context(), userID, year, month, accountID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -35,8 +36,9 @@ func (ctrl *ReportController) KPIs(c *gin.Context) {
 	yearStr := c.DefaultQuery("year", strconv.Itoa(time.Now().Year()))
 	year, _ := strconv.Atoi(yearStr)
 	accountID := accountIDParam(c)
+	userID := userIDFromContext(c)
 
-	kpis, err := ctrl.svc.CalculateKPIs(c.Request.Context(), year, accountID)
+	kpis, err := ctrl.svc.CalculateKPIs(c.Request.Context(), userID, year, accountID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -48,8 +50,9 @@ func (ctrl *ReportController) Trend(c *gin.Context) {
 	yearStr := c.DefaultQuery("year", strconv.Itoa(time.Now().Year()))
 	year, _ := strconv.Atoi(yearStr)
 	accountID := accountIDParam(c)
+	userID := userIDFromContext(c)
 
-	trend, err := ctrl.svc.GetTrend(c.Request.Context(), year, accountID)
+	trend, err := ctrl.svc.GetTrend(c.Request.Context(), userID, year, accountID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -61,8 +64,9 @@ func (ctrl *ReportController) AnnualReport(c *gin.Context) {
 	yearStr := c.DefaultQuery("year", strconv.Itoa(time.Now().Year()))
 	year, _ := strconv.Atoi(yearStr)
 	accountID := accountIDParam(c)
+	userID := userIDFromContext(c)
 
-	report, err := ctrl.svc.BuildAnnualReport(c.Request.Context(), year, accountID)
+	report, err := ctrl.svc.BuildAnnualReport(c.Request.Context(), userID, year, accountID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -75,6 +79,7 @@ func (ctrl *ReportController) CategorySummary(c *gin.Context) {
 	period := c.DefaultQuery("period", "mes")
 	year, month := yearMonthParams(c)
 	accountID := accountIDParam(c)
+	userID := userIDFromContext(c)
 
 	var (
 		result []domain.CategorySummary
@@ -82,11 +87,11 @@ func (ctrl *ReportController) CategorySummary(c *gin.Context) {
 	)
 	switch period {
 	case "todo":
-		result, err = ctrl.svc.GetAllTimeTagTotals(c.Request.Context(), accountID)
+		result, err = ctrl.svc.GetAllTimeTagTotals(c.Request.Context(), userID, accountID)
 	case "año":
-		result, err = ctrl.svc.GetYearlyTagTotals(c.Request.Context(), year, accountID)
+		result, err = ctrl.svc.GetYearlyTagTotals(c.Request.Context(), userID, year, accountID)
 	default:
-		result, err = ctrl.svc.GetTagTotals(c.Request.Context(), year, month, accountID)
+		result, err = ctrl.svc.GetTagTotals(c.Request.Context(), userID, year, month, accountID)
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -96,7 +101,8 @@ func (ctrl *ReportController) CategorySummary(c *gin.Context) {
 }
 
 func (ctrl *ReportController) ActiveInstallments(c *gin.Context) {
-	items, err := ctrl.svc.ActiveInstallments(c.Request.Context())
+	userID := userIDFromContext(c)
+	items, err := ctrl.svc.ActiveInstallments(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -108,7 +114,8 @@ func (ctrl *ReportController) ActiveInstallments(c *gin.Context) {
 func (ctrl *ReportController) BudgetVsActual(c *gin.Context) {
 	year, month := yearMonthParams(c)
 	accountID := accountIDParam(c)
-	result, err := ctrl.svc.GetTagTotals(c.Request.Context(), year, month, accountID)
+	userID := userIDFromContext(c)
+	result, err := ctrl.svc.GetTagTotals(c.Request.Context(), userID, year, month, accountID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -17,10 +17,10 @@ func NewReportService(reports domain.ReportRepository) *ReportService {
 }
 
 // BuildMonthlyReport assembles the full monthly report (used by report and insights handlers).
-func (s *ReportService) BuildMonthlyReport(ctx context.Context, year, month int, accountID *int64) (domain.MonthlyReport, error) {
+func (s *ReportService) BuildMonthlyReport(ctx context.Context, userID int64, year, month int, accountID *int64) (domain.MonthlyReport, error) {
 	report := domain.MonthlyReport{Year: year, Month: month}
 
-	income, expenses, investments, err := s.reports.MonthlyTotals(ctx, year, month, accountID)
+	income, expenses, investments, err := s.reports.MonthlyTotals(ctx, userID, year, month, accountID)
 	if err != nil {
 		return report, err
 	}
@@ -32,12 +32,12 @@ func (s *ReportService) BuildMonthlyReport(ctx context.Context, year, month int,
 		report.SavingsRate = float64(income-expenses-investments) / float64(income)
 	}
 
-	report.ByCategory, err = s.reports.TagTotals(ctx, year, month, accountID)
+	report.ByCategory, err = s.reports.TagTotals(ctx, userID, year, month, accountID)
 	if err != nil {
 		return report, err
 	}
 
-	report.TopExpenses, err = s.reports.TopExpenses(ctx, year, month, 5, accountID)
+	report.TopExpenses, err = s.reports.TopExpenses(ctx, userID, year, month, 5, accountID)
 	if err != nil {
 		return report, err
 	}
@@ -46,8 +46,8 @@ func (s *ReportService) BuildMonthlyReport(ctx context.Context, year, month int,
 }
 
 // CalculateKPIs computes year-to-date financial KPIs.
-func (s *ReportService) CalculateKPIs(ctx context.Context, year int, accountID *int64) (domain.KPIReport, error) {
-	opening, income, expenses, investments, err := s.reports.YearlyKPIs(ctx, year, accountID)
+func (s *ReportService) CalculateKPIs(ctx context.Context, userID int64, year int, accountID *int64) (domain.KPIReport, error) {
+	opening, income, expenses, investments, err := s.reports.YearlyKPIs(ctx, userID, year, accountID)
 	if err != nil {
 		return domain.KPIReport{}, err
 	}
@@ -67,39 +67,39 @@ func (s *ReportService) CalculateKPIs(ctx context.Context, year int, accountID *
 }
 
 // GetTrend returns monthly income/expense totals for a given year.
-func (s *ReportService) GetTrend(ctx context.Context, year int, accountID *int64) ([]domain.MonthlyReport, error) {
-	return s.reports.MonthlyTrend(ctx, year, accountID)
+func (s *ReportService) GetTrend(ctx context.Context, userID int64, year int, accountID *int64) ([]domain.MonthlyReport, error) {
+	return s.reports.MonthlyTrend(ctx, userID, year, accountID)
 }
 
 // GetTagTotals returns tag-based spending summary for a given month, used by the budget-vs-actual endpoint.
-func (s *ReportService) GetTagTotals(ctx context.Context, year, month int, accountID *int64) ([]domain.CategorySummary, error) {
-	return s.reports.TagTotals(ctx, year, month, accountID)
+func (s *ReportService) GetTagTotals(ctx context.Context, userID int64, year, month int, accountID *int64) ([]domain.CategorySummary, error) {
+	return s.reports.TagTotals(ctx, userID, year, month, accountID)
 }
 
 // BuildAnnualReport assembles KPIs, monthly trend, tag totals, top expenses,
 // year-end projection, and active CC installments for a full year.
-func (s *ReportService) BuildAnnualReport(ctx context.Context, year int, accountID *int64) (domain.AnnualReport, error) {
+func (s *ReportService) BuildAnnualReport(ctx context.Context, userID int64, year int, accountID *int64) (domain.AnnualReport, error) {
 	report := domain.AnnualReport{Year: year}
 
-	kpis, err := s.CalculateKPIs(ctx, year, accountID)
+	kpis, err := s.CalculateKPIs(ctx, userID, year, accountID)
 	if err != nil {
 		return report, err
 	}
 	report.KPIs = kpis
 
-	trend, err := s.reports.MonthlyTrend(ctx, year, accountID)
+	trend, err := s.reports.MonthlyTrend(ctx, userID, year, accountID)
 	if err != nil {
 		return report, err
 	}
 	report.MonthlyTrend = trend
 
-	cats, err := s.reports.YearlyTagTotals(ctx, year, accountID)
+	cats, err := s.reports.YearlyTagTotals(ctx, userID, year, accountID)
 	if err != nil {
 		return report, err
 	}
 	report.CategoryTotals = cats
 
-	top, err := s.reports.YearlyTopExpenses(ctx, year, 10, accountID)
+	top, err := s.reports.YearlyTopExpenses(ctx, userID, year, 10, accountID)
 	if err != nil {
 		return report, err
 	}
@@ -107,7 +107,7 @@ func (s *ReportService) BuildAnnualReport(ctx context.Context, year int, account
 
 	report.Projection = s.computeProjection(year, kpis)
 
-	installments, err := s.reports.ActiveInstallments(ctx)
+	installments, err := s.reports.ActiveInstallments(ctx, userID)
 	if err != nil {
 		return report, err
 	}
@@ -116,8 +116,8 @@ func (s *ReportService) BuildAnnualReport(ctx context.Context, year int, account
 	return report, nil
 }
 
-func (s *ReportService) ActiveInstallments(ctx context.Context) ([]domain.CreditCardItem, error) {
-	return s.reports.ActiveInstallments(ctx)
+func (s *ReportService) ActiveInstallments(ctx context.Context, userID int64) ([]domain.CreditCardItem, error) {
+	return s.reports.ActiveInstallments(ctx, userID)
 }
 
 // computeProjection estimates the year-end cash balance based on YTD monthly averages.
@@ -141,16 +141,16 @@ func (s *ReportService) computeProjection(year int, kpis domain.KPIReport) int64
 }
 
 // GetMonthlyHistory returns per-month summaries for months before the given month.
-func (s *ReportService) GetMonthlyHistory(ctx context.Context, year, beforeMonth int, accountID *int64) ([]domain.MonthlyReport, error) {
-	return s.reports.MonthlyHistory(ctx, year, beforeMonth, accountID)
+func (s *ReportService) GetMonthlyHistory(ctx context.Context, userID int64, year, beforeMonth int, accountID *int64) ([]domain.MonthlyReport, error) {
+	return s.reports.MonthlyHistory(ctx, userID, year, beforeMonth, accountID)
 }
 
 // GetYearlyTagTotals returns expense totals grouped by tag for a full year.
-func (s *ReportService) GetYearlyTagTotals(ctx context.Context, year int, accountID *int64) ([]domain.CategorySummary, error) {
-	return s.reports.YearlyTagTotals(ctx, year, accountID)
+func (s *ReportService) GetYearlyTagTotals(ctx context.Context, userID int64, year int, accountID *int64) ([]domain.CategorySummary, error) {
+	return s.reports.YearlyTagTotals(ctx, userID, year, accountID)
 }
 
 // GetAllTimeTagTotals returns expense totals grouped by tag across all time.
-func (s *ReportService) GetAllTimeTagTotals(ctx context.Context, accountID *int64) ([]domain.CategorySummary, error) {
-	return s.reports.AllTimeTagTotals(ctx, accountID)
+func (s *ReportService) GetAllTimeTagTotals(ctx context.Context, userID int64, accountID *int64) ([]domain.CategorySummary, error) {
+	return s.reports.AllTimeTagTotals(ctx, userID, accountID)
 }

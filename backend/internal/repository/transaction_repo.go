@@ -38,6 +38,10 @@ func (r *transactionRepo) List(ctx context.Context, f domain.TransactionFilter) 
 	var args []any
 	n := 1
 
+	where += fmt.Sprintf(" AND user_id = $%d", n)
+	args = append(args, f.UserID)
+	n++
+
 	if f.AccountID != "" {
 		where += fmt.Sprintf(" AND account_id = $%d", n)
 		args = append(args, f.AccountID)

@@ -14,6 +14,13 @@ type UserRepository interface {
 	Create(ctx context.Context, email, passwordHash string) (User, error)
 }
 
+// AccountDeletePreview holds the count of records that will be removed when an account is deleted.
+type AccountDeletePreview struct {
+	Transactions    int `json:"transactions"`
+	CCStatements    int `json:"cc_statements"`
+	CCItems         int `json:"cc_items"`
+}
+
 // AccountRepository is the port for account persistence.
 type AccountRepository interface {
 	List(ctx context.Context, userID int64) ([]Account, error)
@@ -21,6 +28,8 @@ type AccountRepository interface {
 	Create(ctx context.Context, p CreateAccountParams) (Account, error)
 	Update(ctx context.Context, id int64, p UpdateAccountParams) (Account, error)
 	Delete(ctx context.Context, id int64) error
+	DeletePreview(ctx context.Context, id int64) (AccountDeletePreview, error)
+	DeleteCascade(ctx context.Context, id int64) error
 }
 
 // TransactionRepository is the port for transaction persistence.
@@ -93,17 +102,18 @@ type UserTagRuleRepository interface {
 }
 
 // ReportRepository is the port for complex read-only aggregations.
-// accountID filters results to a single account when non-nil; nil means all accounts.
+// userID scopes all results to the authenticated user.
+// accountID further filters to a single account when non-nil; nil means all accounts for that user.
 type ReportRepository interface {
-	MonthlyTotals(ctx context.Context, year, month int, accountID *int64) (income, expenses, investments int64, err error)
+	MonthlyTotals(ctx context.Context, userID int64, year, month int, accountID *int64) (income, expenses, investments int64, err error)
 	// TagTotals returns expense totals grouped by tag for a given month, joined with tag_budgets.
-	TagTotals(ctx context.Context, year, month int, accountID *int64) ([]CategorySummary, error)
-	TopExpenses(ctx context.Context, year, month, limit int, accountID *int64) ([]Transaction, error)
-	YearlyKPIs(ctx context.Context, year int, accountID *int64) (opening, income, expenses, investments int64, err error)
-	MonthlyTrend(ctx context.Context, year int, accountID *int64) ([]MonthlyReport, error)
-	MonthlyHistory(ctx context.Context, year, beforeMonth int, accountID *int64) ([]MonthlyReport, error)
-	YearlyTagTotals(ctx context.Context, year int, accountID *int64) ([]CategorySummary, error)
-	YearlyTopExpenses(ctx context.Context, year, limit int, accountID *int64) ([]Transaction, error)
-	AllTimeTagTotals(ctx context.Context, accountID *int64) ([]CategorySummary, error)
-	ActiveInstallments(ctx context.Context) ([]CreditCardItem, error)
+	TagTotals(ctx context.Context, userID int64, year, month int, accountID *int64) ([]CategorySummary, error)
+	TopExpenses(ctx context.Context, userID int64, year, month, limit int, accountID *int64) ([]Transaction, error)
+	YearlyKPIs(ctx context.Context, userID int64, year int, accountID *int64) (opening, income, expenses, investments int64, err error)
+	MonthlyTrend(ctx context.Context, userID int64, year int, accountID *int64) ([]MonthlyReport, error)
+	MonthlyHistory(ctx context.Context, userID int64, year, beforeMonth int, accountID *int64) ([]MonthlyReport, error)
+	YearlyTagTotals(ctx context.Context, userID int64, year int, accountID *int64) ([]CategorySummary, error)
+	YearlyTopExpenses(ctx context.Context, userID int64, year, limit int, accountID *int64) ([]Transaction, error)
+	AllTimeTagTotals(ctx context.Context, userID int64, accountID *int64) ([]CategorySummary, error)
+	ActiveInstallments(ctx context.Context, userID int64) ([]CreditCardItem, error)
 }

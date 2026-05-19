@@ -21,15 +21,16 @@ func NewInsightController(reports *service.ReportService) *InsightController {
 func (ctrl *InsightController) Insights(c *gin.Context) {
 	year, month := yearMonthParams(c)
 	accountID := accountIDParam(c)
+	userID := userIDFromContext(c)
 	ctx := c.Request.Context()
 
-	current, err := ctrl.reports.BuildMonthlyReport(ctx, year, month, accountID)
+	current, err := ctrl.reports.BuildMonthlyReport(ctx, userID, year, month, accountID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	history, err := ctrl.reports.GetMonthlyHistory(ctx, year, month, accountID)
+	history, err := ctrl.reports.GetMonthlyHistory(ctx, userID, year, month, accountID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -16,7 +16,7 @@ func NewReportRepository(db *sql.DB) domain.ReportRepository {
 	return &reportRepo{db: db}
 }
 
-func (r *reportRepo) MonthlyTotals(ctx context.Context, year, month int, accountID *int64) (income, expenses, investments int64, err error) {
+func (r *reportRepo) MonthlyTotals(ctx context.Context, userID int64, year, month int, accountID *int64) (income, expenses, investments int64, err error) {
 	err = r.db.QueryRowContext(ctx, `
 		SELECT
 			COALESCE(SUM(CASE WHEN flow = 'INCOME'  THEN amount ELSE 0 END), 0),
@@ -26,12 +26,13 @@ func (r *reportRepo) MonthlyTotals(ctx context.Context, year, month int, account
 		WHERE date >= make_date($1::int, $2::int, 1)
 		  AND date <  make_date($1::int, $2::int, 1) + interval '1 month'
 		  AND ($3::bigint IS NULL OR account_id = $3)
-	`, year, month, accountID).Scan(&income, &expenses, &investments)
+		  AND user_id = $4
+	`, year, month, accountID, userID).Scan(&income, &expenses, &investments)
 	return
 }
 
 // TagTotals returns expense totals grouped by tag for a given month, joined with tag_budgets.
-func (r *reportRepo) TagTotals(ctx context.Context, year, month int, accountID *int64) ([]domain.CategorySummary, error) {
+func (r *reportRepo) TagTotals(ctx context.Context, userID int64, year, month int, accountID *int64) ([]domain.CategorySummary, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			t.tag,
@@ -40,16 +41,17 @@ func (r *reportRepo) TagTotals(ctx context.Context, year, month int, accountID *
 			COUNT(*) AS cnt
 		FROM transactions tr
 		CROSS JOIN LATERAL unnest(tr.tags) AS t(tag)
-		LEFT JOIN user_tags ut_b ON ut_b.tag = t.tag
+		LEFT JOIN user_tags ut_b ON ut_b.tag = t.tag AND ut_b.user_id = $4
 		LEFT JOIN tag_budgets tb_m ON tb_m.user_tag_id = ut_b.id AND tb_m.year = $1 AND tb_m.month = $2
 		LEFT JOIN tag_budgets tb_d ON tb_d.user_tag_id = ut_b.id AND tb_d.year = $1 AND tb_d.month = 0
 		WHERE tr.date >= make_date($1::int, $2::int, 1)
 		  AND tr.date <  make_date($1::int, $2::int, 1) + interval '1 month'
 		  AND tr.flow = 'EXPENSE'
 		  AND ($3::bigint IS NULL OR tr.account_id = $3)
+		  AND tr.user_id = $4
 		GROUP BY t.tag
 		ORDER BY total DESC
-	`, year, month, accountID)
+	`, year, month, accountID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +74,7 @@ func (r *reportRepo) TagTotals(ctx context.Context, year, month int, accountID *
 	return result, rows.Err()
 }
 
-func (r *reportRepo) TopExpenses(ctx context.Context, year, month, limit int, accountID *int64) ([]domain.Transaction, error) {
+func (r *reportRepo) TopExpenses(ctx context.Context, userID int64, year, month, limit int, accountID *int64) ([]domain.Transaction, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, date, description, flow, amount, source, created_at, updated_at
 		FROM transactions
@@ -80,9 +82,10 @@ func (r *reportRepo) TopExpenses(ctx context.Context, year, month, limit int, ac
 		  AND date <  make_date($1::int, $2::int, 1) + interval '1 month'
 		  AND flow = 'EXPENSE'
 		  AND ($4::bigint IS NULL OR account_id = $4)
+		  AND user_id = $5
 		ORDER BY amount DESC
 		LIMIT $3
-	`, year, month, limit, accountID)
+	`, year, month, limit, accountID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +103,7 @@ func (r *reportRepo) TopExpenses(ctx context.Context, year, month, limit int, ac
 	return txs, nil
 }
 
-func (r *reportRepo) YearlyKPIs(ctx context.Context, year int, accountID *int64) (opening, income, expenses, investments int64, err error) {
+func (r *reportRepo) YearlyKPIs(ctx context.Context, userID int64, year int, accountID *int64) (opening, income, expenses, investments int64, err error) {
 	err = r.db.QueryRowContext(ctx, `
 		SELECT
 			COALESCE(SUM(CASE WHEN flow = 'OPENING' THEN amount ELSE 0 END), 0),
@@ -111,11 +114,12 @@ func (r *reportRepo) YearlyKPIs(ctx context.Context, year int, accountID *int64)
 		WHERE date >= make_date($1::int, 1, 1)
 		  AND date <  make_date($1::int, 1, 1) + interval '1 year'
 		  AND ($2::bigint IS NULL OR account_id = $2)
-	`, year, accountID).Scan(&opening, &income, &expenses, &investments)
+		  AND user_id = $3
+	`, year, accountID, userID).Scan(&opening, &income, &expenses, &investments)
 	return
 }
 
-func (r *reportRepo) MonthlyTrend(ctx context.Context, year int, accountID *int64) ([]domain.MonthlyReport, error) {
+func (r *reportRepo) MonthlyTrend(ctx context.Context, userID int64, year int, accountID *int64) ([]domain.MonthlyReport, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			EXTRACT(MONTH FROM date)::int,
@@ -125,9 +129,10 @@ func (r *reportRepo) MonthlyTrend(ctx context.Context, year int, accountID *int6
 		WHERE date >= make_date($1::int, 1, 1)
 		  AND date <  make_date($1::int, 1, 1) + interval '1 year'
 		  AND ($2::bigint IS NULL OR account_id = $2)
+		  AND user_id = $3
 		GROUP BY EXTRACT(MONTH FROM date)
 		ORDER BY 1 ASC
-	`, year, accountID)
+	`, year, accountID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +159,7 @@ func (r *reportRepo) MonthlyTrend(ctx context.Context, year int, accountID *int6
 	return trend, nil
 }
 
-func (r *reportRepo) MonthlyHistory(ctx context.Context, year, beforeMonth int, accountID *int64) ([]domain.MonthlyReport, error) {
+func (r *reportRepo) MonthlyHistory(ctx context.Context, userID int64, year, beforeMonth int, accountID *int64) ([]domain.MonthlyReport, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			EXTRACT(MONTH FROM date)::int,
@@ -164,9 +169,10 @@ func (r *reportRepo) MonthlyHistory(ctx context.Context, year, beforeMonth int, 
 		WHERE date >= make_date($1::int, 1, 1)
 		  AND date <  make_date($1::int, $2::int, 1)
 		  AND ($3::bigint IS NULL OR account_id = $3)
+		  AND user_id = $4
 		GROUP BY EXTRACT(MONTH FROM date)
 		ORDER BY 1 ASC
-	`, year, beforeMonth, accountID)
+	`, year, beforeMonth, accountID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -192,15 +198,16 @@ func (r *reportRepo) MonthlyHistory(ctx context.Context, year, beforeMonth int, 
 				COUNT(*)
 			FROM transactions tr
 			CROSS JOIN LATERAL unnest(tr.tags) AS t(tag)
-			LEFT JOIN user_tags ut_b ON ut_b.tag = t.tag
+			LEFT JOIN user_tags ut_b ON ut_b.tag = t.tag AND ut_b.user_id = $4
 			LEFT JOIN tag_budgets tb_m ON tb_m.user_tag_id = ut_b.id AND tb_m.year = $1 AND tb_m.month = $2
 			LEFT JOIN tag_budgets tb_d ON tb_d.user_tag_id = ut_b.id AND tb_d.year = $1 AND tb_d.month = 0
 			WHERE tr.date >= make_date($1::int, $2::int, 1)
 			  AND tr.date <  make_date($1::int, $2::int, 1) + interval '1 month'
 			  AND tr.flow = 'EXPENSE'
 			  AND ($3::bigint IS NULL OR tr.account_id = $3)
+			  AND tr.user_id = $4
 			GROUP BY t.tag
-		`, year, m.Month, accountID)
+		`, year, m.Month, accountID, userID)
 		if err == nil {
 			for catRows.Next() {
 				var cs domain.CategorySummary
@@ -221,7 +228,7 @@ func (r *reportRepo) MonthlyHistory(ctx context.Context, year, beforeMonth int, 
 }
 
 // YearlyTagTotals returns expense totals grouped by tag for a full year.
-func (r *reportRepo) YearlyTagTotals(ctx context.Context, year int, accountID *int64) ([]domain.CategorySummary, error) {
+func (r *reportRepo) YearlyTagTotals(ctx context.Context, userID int64, year int, accountID *int64) ([]domain.CategorySummary, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			t.tag,
@@ -232,9 +239,10 @@ func (r *reportRepo) YearlyTagTotals(ctx context.Context, year int, accountID *i
 		  AND tr.date <  make_date($1::int, 1, 1) + interval '1 year'
 		  AND tr.flow = 'EXPENSE'
 		  AND ($2::bigint IS NULL OR tr.account_id = $2)
+		  AND tr.user_id = $3
 		GROUP BY t.tag
 		ORDER BY total DESC
-	`, year, accountID)
+	`, year, accountID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +262,7 @@ func (r *reportRepo) YearlyTagTotals(ctx context.Context, year int, accountID *i
 	return result, rows.Err()
 }
 
-func (r *reportRepo) YearlyTopExpenses(ctx context.Context, year, limit int, accountID *int64) ([]domain.Transaction, error) {
+func (r *reportRepo) YearlyTopExpenses(ctx context.Context, userID int64, year, limit int, accountID *int64) ([]domain.Transaction, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, date, description, flow, amount, source, created_at, updated_at
 		FROM transactions
@@ -262,9 +270,10 @@ func (r *reportRepo) YearlyTopExpenses(ctx context.Context, year, limit int, acc
 		  AND date <  make_date($1::int, 1, 1) + interval '1 year'
 		  AND flow = 'EXPENSE'
 		  AND ($3::bigint IS NULL OR account_id = $3)
+		  AND user_id = $4
 		ORDER BY amount DESC
 		LIMIT $2
-	`, year, limit, accountID)
+	`, year, limit, accountID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +292,7 @@ func (r *reportRepo) YearlyTopExpenses(ctx context.Context, year, limit int, acc
 }
 
 // AllTimeTagTotals returns expense totals grouped by tag across all time.
-func (r *reportRepo) AllTimeTagTotals(ctx context.Context, accountID *int64) ([]domain.CategorySummary, error) {
+func (r *reportRepo) AllTimeTagTotals(ctx context.Context, userID int64, accountID *int64) ([]domain.CategorySummary, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			t.tag,
@@ -292,9 +301,10 @@ func (r *reportRepo) AllTimeTagTotals(ctx context.Context, accountID *int64) ([]
 		FROM transactions tr, unnest(tr.tags) AS t(tag)
 		WHERE tr.flow = 'EXPENSE'
 		  AND ($1::bigint IS NULL OR tr.account_id = $1)
+		  AND tr.user_id = $2
 		GROUP BY t.tag
 		ORDER BY total DESC
-	`, accountID)
+	`, accountID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -314,15 +324,16 @@ func (r *reportRepo) AllTimeTagTotals(ctx context.Context, accountID *int64) ([]
 	return result, rows.Err()
 }
 
-func (r *reportRepo) ActiveInstallments(ctx context.Context) ([]domain.CreditCardItem, error) {
+func (r *reportRepo) ActiveInstallments(ctx context.Context, userID int64) ([]domain.CreditCardItem, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, statement_id, date, description, amount, currency,
 		       installment_current, installment_total, item_type, bank_raw_id, created_at
 		FROM credit_card_items
 		WHERE installment_total > 1
 		  AND installment_current < installment_total
+		  AND statement_id IN (SELECT id FROM credit_card_statements WHERE user_id = $1)
 		ORDER BY date DESC
-	`)
+	`, userID)
 	if err != nil {
 		return nil, err
 	}

@@ -5,6 +5,7 @@ package domain
 
 // TransactionFilter holds optional query filters for listing transactions.
 type TransactionFilter struct {
+	UserID    int64
 	Year      string
 	Month     string
 	Flow      string
