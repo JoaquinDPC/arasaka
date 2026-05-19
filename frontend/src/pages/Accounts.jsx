@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api/client'
+import { useAccount } from '../context/AccountContext'
 import { formatCLP, formatDate } from '../lib/formatters'
 import { ACCT_COLORS, SUPPORTED_BANKS, ACCT_TYPES, getBankLabel, getCatColor } from '../lib/constants'
 import Spinner from '../components/Spinner'
@@ -309,6 +310,7 @@ function AccountModal({ account, onSave, onDelete, onClose }) {
     app_tag_inference:     account?.settings?.app_tag_inference ?? true,
     personal_tag_inference: account?.settings?.personal_tag_inference ?? true,
     pdf_password:          '',
+    opening_balance:       0,
   })
   const [showPwd, setShowPwd] = useState(false)
   const set = (k, v) => setF(p => ({ ...p, [k]: v }))
@@ -352,6 +354,24 @@ function AccountModal({ account, onSave, onDelete, onClose }) {
             </div>
           </div>
         </div>
+
+        {/* ── Saldo inicial (solo al crear) ── */}
+        {!account && (
+          <div className="ff full" style={{ marginTop: 16 }}>
+            <div className="flbl">Saldo inicial</div>
+            <input
+              className="finput"
+              type="number"
+              min="0"
+              placeholder="0"
+              value={f.opening_balance || ''}
+              onChange={e => set('opening_balance', parseInt(e.target.value) || 0)}
+            />
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+              Balance de la cuenta antes del primer movimiento. Se puede modificar después.
+            </div>
+          </div>
+        )}
 
         {/* ── Separador Configuración ── */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '22px 0 18px' }}>
@@ -423,12 +443,61 @@ function AccountModal({ account, onSave, onDelete, onClose }) {
   )
 }
 
+function DeleteConfirmModal({ account, preview, onConfirm, onClose, deleting }) {
+  const total = preview.transactions + preview.cc_statements + preview.cc_items
+  return (
+    <div className="overlay fade" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ width: 420 }}>
+        <div className="modal-hdr">
+          <div className="modal-ttl" style={{ color: 'var(--red)' }}>Eliminar cuenta</div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.6 }}>
+          Esta acción eliminará <strong style={{ color: 'var(--text)' }}>{account.name}</strong> y todos sus registros asociados. No se puede deshacer.
+        </p>
+
+        <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+          {[
+            ['Transacciones', preview.transactions],
+            ['Estados TC', preview.cc_statements],
+            ['Ítems TC', preview.cc_items],
+          ].map(([label, count]) => (
+            <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+              <span style={{ color: 'var(--text-muted)' }}>{label}</span>
+              <span style={{ fontFamily: 'var(--mono)', fontWeight: 700, color: count > 0 ? 'var(--red)' : 'var(--text-dim)' }}>{count.toLocaleString('es-CL')}</span>
+            </div>
+          ))}
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8, display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+            <span style={{ color: 'var(--text)', fontWeight: 600 }}>Total registros</span>
+            <span style={{ fontFamily: 'var(--mono)', fontWeight: 700, color: 'var(--red)' }}>{total.toLocaleString('es-CL')}</span>
+          </div>
+        </div>
+
+        <div className="mfooter">
+          <button className="btn-ghost" onClick={onClose}>Cancelar</button>
+          <button
+            onClick={onConfirm}
+            disabled={deleting}
+            style={{ padding: '8px 20px', background: 'var(--red)', border: 'none', borderRadius: 7, color: '#fff', fontSize: 13, fontWeight: 700, cursor: deleting ? 'default' : 'pointer', fontFamily: 'var(--font)', opacity: deleting ? .6 : 1 }}
+          >
+            {deleting ? 'Eliminando…' : `Eliminar ${total.toLocaleString('es-CL')} registros`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Accounts() {
+  const { reload: reloadContext } = useAccount()
   const [accounts, setAccounts] = useState([])
   const [loading, setLoading]   = useState(true)
   const [modal, setModal]       = useState(false)
   const [editing, setEditing]   = useState(null)
-  const [tcImport, setTcImport] = useState(null) // account being imported into
+  const [tcImport, setTcImport] = useState(null)
+  const [deleteConfirm, setDeleteConfirm] = useState(null) // { account, preview }
+  const [deleting, setDeleting] = useState(false)
 
   function load() {
     setLoading(true)
@@ -441,18 +510,43 @@ export default function Accounts() {
   useEffect(() => { load() }, [])
 
   async function save(f) {
-    if (editing) await api.updateAccount(editing.id, f).catch(() => {})
-    else await api.createAccount(f).catch(() => {})
+    if (editing) {
+      await api.updateAccount(editing.id, f).catch(() => {})
+    } else {
+      const newAccount = await api.createAccount(f).catch(() => null)
+      if (newAccount?.id && f.opening_balance > 0) {
+        await api.setOpeningBalance(newAccount.id, f.opening_balance).catch(() => {})
+      }
+    }
     load()
+    reloadContext()
     setModal(false)
     setEditing(null)
   }
 
-  async function remove(id) {
-    await api.deleteAccount(id).catch(() => {})
-    load()
-    setModal(false)
-    setEditing(null)
+  async function startDelete(account) {
+    try {
+      const preview = await api.accountDeletePreview(account.id)
+      setModal(false)
+      setDeleteConfirm({ account, preview })
+    } catch {
+      // fallback: show modal with zero counts still lets user confirm
+      setModal(false)
+      setDeleteConfirm({ account, preview: { transactions: 0, cc_statements: 0, cc_items: 0 } })
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteConfirm) return
+    setDeleting(true)
+    try {
+      await api.deleteAccount(deleteConfirm.account.id)
+      load()
+      reloadContext()
+      setDeleteConfirm(null)
+      setEditing(null)
+    } catch { /* stay open */ }
+    finally { setDeleting(false) }
   }
 
   return (
@@ -533,8 +627,17 @@ export default function Accounts() {
         <AccountModal
           account={editing}
           onSave={save}
-          onDelete={editing ? () => remove(editing.id) : null}
+          onDelete={editing ? () => startDelete(editing) : null}
           onClose={() => { setModal(false); setEditing(null) }}
+        />
+      )}
+      {deleteConfirm && (
+        <DeleteConfirmModal
+          account={deleteConfirm.account}
+          preview={deleteConfirm.preview}
+          onConfirm={confirmDelete}
+          onClose={() => setDeleteConfirm(null)}
+          deleting={deleting}
         />
       )}
       {tcImport && (

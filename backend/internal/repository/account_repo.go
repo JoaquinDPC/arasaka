@@ -164,3 +164,41 @@ func (r *accountRepo) Delete(ctx context.Context, id int64) error {
 	}
 	return nil
 }
+
+func (r *accountRepo) DeletePreview(ctx context.Context, id int64) (domain.AccountDeletePreview, error) {
+	var p domain.AccountDeletePreview
+	err := r.db.QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM transactions        WHERE account_id = $1),
+			(SELECT COUNT(*) FROM credit_card_statements WHERE account_id = $1),
+			(SELECT COUNT(*) FROM credit_card_items   WHERE account_id = $1)
+	`, id).Scan(&p.Transactions, &p.CCStatements, &p.CCItems)
+	return p, err
+}
+
+func (r *accountRepo) DeleteCascade(ctx context.Context, id int64) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err = tx.ExecContext(ctx, "DELETE FROM credit_card_items       WHERE account_id = $1", id); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, "DELETE FROM credit_card_statements   WHERE account_id = $1", id); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, "DELETE FROM transactions             WHERE account_id = $1", id); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, "DELETE FROM accounts WHERE id = $1", id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("not found")
+	}
+	return tx.Commit()
+}
