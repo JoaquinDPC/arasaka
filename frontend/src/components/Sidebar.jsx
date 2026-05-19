@@ -313,7 +313,7 @@ export default function Sidebar({ user, onLogout, open, onClose }) {
 
       <div className="sb-user">
         <div className="avatar">{(user?.email || 'U')[0].toUpperCase()}</div>
-        <div>
+        <div style={{ minWidth: 0, overflow: 'hidden', flex: 1 }}>
           <div className="sb-user-name">{user?.email || 'Usuario'}</div>
           <div className="sb-user-out" onClick={onLogout}>Cerrar sesión</div>
         </div>
