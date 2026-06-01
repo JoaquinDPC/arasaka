@@ -178,10 +178,13 @@ func inferYear(day, month int, from, to time.Time) int {
 		from = now.AddDate(-1, -1, 0) // 13 months ago
 		to = now.AddDate(0, 1, 0)     // 1 month in the future
 	}
-	years := []int{from.Year(), to.Year()}
+	// Try the most-recent year first so that April 2026 is preferred over April 2025
+	// when both fall within the ±13-month fallback window (avoids wrong-year assignment
+	// when the PDF period header is absent or not parsed).
+	years := []int{to.Year(), from.Year()}
 	if to.Year() > from.Year()+10 {
-		// Period end year looks wrong (e.g. PDF character scrambling producing year 2326).
-		// Only try from.Year() and from.Year()+1 to avoid misclassification.
+		// Period end looks scrambled (e.g. year 2326 from bad glyph encoding).
+		// Restrict to statement start year and the next.
 		years = []int{from.Year(), from.Year() + 1}
 	}
 	for _, y := range years {

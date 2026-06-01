@@ -51,7 +51,7 @@ type UpdateTransactionParams struct {
 	RememberDescription *bool // if true, persist custom_description in personal rules
 }
 
-type CreateCCStatementParams struct {
+type CreateCCBillParams struct {
 	ExternalAccountID string
 	PeriodFrom        time.Time
 	PeriodTo          time.Time
@@ -64,7 +64,7 @@ type CreateCCStatementParams struct {
 }
 
 type CreateCCItemParams struct {
-	StatementID        int64
+	BillID             int64
 	Date               time.Time
 	Description        string
 	Amount             int64

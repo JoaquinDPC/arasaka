@@ -170,7 +170,8 @@ func (ctrl *TransactionController) Update(c *gin.Context) {
 	p.Tags = req.Tags
 	p.RememberDescription = req.RememberDescription
 
-	t, err := ctrl.svc.Update(c.Request.Context(), id, p)
+	userID := userIDFromContext(c)
+	t, err := ctrl.svc.Update(c.Request.Context(), id, userID, p)
 	if err != nil {
 		if err.Error() == "not found" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
@@ -202,7 +203,8 @@ func (ctrl *TransactionController) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := ctrl.svc.Delete(c.Request.Context(), id); err != nil {
+	userID := userIDFromContext(c)
+	if err := ctrl.svc.Delete(c.Request.Context(), id, userID); err != nil {
 		if err.Error() == "not found" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return

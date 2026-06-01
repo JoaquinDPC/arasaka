@@ -12,7 +12,7 @@ type Controllers struct {
 	Auth         *controller.AuthController
 	Accounts     *controller.AccountController
 	Transactions *controller.TransactionController
-	Budgets      *controller.BudgetController
+	Tags         *controller.TagController
 	Reports      *controller.ReportController
 	Insights     *controller.InsightController
 	Sync         *controller.SyncController
@@ -33,6 +33,8 @@ func registerRoutes(r *gin.Engine, ctrl Controllers, jwtSecret string, devBypass
 	api.GET("/accounts", ctrl.Accounts.List)
 	api.POST("/accounts", ctrl.Accounts.Create)
 	api.PUT("/accounts/:id", ctrl.Accounts.Update)
+	api.GET("/accounts/:id/delete-preview", ctrl.Accounts.DeletePreview)
+	api.PUT("/accounts/:id/opening-balance", ctrl.Accounts.SetOpeningBalance)
 	api.DELETE("/accounts/:id", ctrl.Accounts.Delete)
 
 	// ── Transactions ───────────────────────────────────────────────────────────
@@ -52,18 +54,18 @@ func registerRoutes(r *gin.Engine, ctrl Controllers, jwtSecret string, devBypass
 	api.GET("/categories/summary", ctrl.Reports.CategorySummary)
 
 	// ── Tags ───────────────────────────────────────────────────────────────────
-	api.GET("/tags", ctrl.Budgets.ListTags)
+	api.GET("/tags", ctrl.Tags.ListTags)
 	api.GET("/tags/used", ctrl.Transactions.ListUsedTags)
 	api.GET("/tags/spending", ctrl.Transactions.TagSpending)
-	api.GET("/tags/personal", ctrl.Budgets.ListPersonalTags)
-	api.POST("/tags/personal", ctrl.Budgets.SavePersonalTag)
-	api.PUT("/tags/personal/:tag/icon", ctrl.Budgets.SetTagIcon)
-	api.PUT("/tags/personal/:tag/color", ctrl.Budgets.SetTagColor)
-	api.DELETE("/tags/personal/:tag", ctrl.Budgets.DeletePersonalTag)
+	api.GET("/tags/personal", ctrl.Tags.ListPersonalTags)
+	api.POST("/tags/personal", ctrl.Tags.SavePersonalTag)
+	api.PUT("/tags/personal/:tag/icon", ctrl.Tags.SetTagIcon)
+	api.PUT("/tags/personal/:tag/color", ctrl.Tags.SetTagColor)
+	api.DELETE("/tags/personal/:tag", ctrl.Tags.DeletePersonalTag)
 
 	// ── Tag Budgets ────────────────────────────────────────────────────────────
-	api.GET("/tag-budgets", ctrl.Budgets.ListTagBudgets)
-	api.PUT("/tag-budgets", ctrl.Budgets.UpsertTagBudget)
+	api.GET("/tag-budgets", ctrl.Tags.ListTagBudgets)
+	api.PUT("/tag-budgets", ctrl.Tags.UpsertTagBudget)
 
 	// ── Insights ───────────────────────────────────────────────────────────────
 	api.GET("/insights", ctrl.Insights.Insights)
@@ -84,8 +86,8 @@ func registerRoutes(r *gin.Engine, ctrl Controllers, jwtSecret string, devBypass
 	api.GET("/admin/popular-keys", ctrl.AdminTagRule.PopularUnmatched)
 
 	// ── Credit Card ────────────────────────────────────────────────────────────
-	api.GET("/credit-card/statements", ctrl.CreditCard.ListStatements)
-	api.GET("/credit-card/statements/:id", ctrl.CreditCard.GetStatement)
+	api.GET("/credit-card/bills", ctrl.CreditCard.ListBills)
+	api.GET("/credit-card/bills/:id", ctrl.CreditCard.GetBill)
 	api.POST("/credit-card/link-payments", ctrl.CreditCard.LinkPayments)
 	api.POST("/credit-card/import-pdf", ctrl.CreditCard.ImportPDF)
 }

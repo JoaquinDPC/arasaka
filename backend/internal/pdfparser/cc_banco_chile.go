@@ -16,7 +16,7 @@ const (
 	CCIntlExtID     = "credit_card_internacional_facturados"
 )
 
-// CCItem is a single line item from a credit card statement.
+// CCItem is a single line item from a credit card bill.
 type CCItem struct {
 	Date               time.Time
 	Description        string
@@ -28,8 +28,8 @@ type CCItem struct {
 	BankRawID          *string // reference code from the PDF
 }
 
-// CCStatementData holds parsed data for one billing section.
-type CCStatementData struct {
+// CCBillData holds parsed data for one billing section (national CLP or international USD).
+type CCBillData struct {
 	ExternalAccountID string
 	PeriodFrom        time.Time
 	PeriodTo          time.Time
@@ -41,8 +41,8 @@ type CCStatementData struct {
 
 // CCParseResult holds the parsed national (CLP) and international (USD) sections.
 type CCParseResult struct {
-	National      *CCStatementData
-	International *CCStatementData
+	National      *CCBillData
+	International *CCBillData
 }
 
 // ccSection accumulates state while parsing one currency section.
@@ -87,7 +87,7 @@ func ParseCCBancoChile(data []byte) (CCParseResult, error) {
 
 	var result CCParseResult
 	if !nat.periodFrom.IsZero() || len(nat.items) > 0 {
-		result.National = &CCStatementData{
+		result.National = &CCBillData{
 			ExternalAccountID: nat.externalID,
 			PeriodFrom:        nat.periodFrom,
 			PeriodTo:          nat.periodTo,
@@ -98,7 +98,7 @@ func ParseCCBancoChile(data []byte) (CCParseResult, error) {
 		}
 	}
 	if !intl.periodFrom.IsZero() || len(intl.items) > 0 {
-		result.International = &CCStatementData{
+		result.International = &CCBillData{
 			ExternalAccountID: intl.externalID,
 			PeriodFrom:        intl.periodFrom,
 			PeriodTo:          intl.periodTo,

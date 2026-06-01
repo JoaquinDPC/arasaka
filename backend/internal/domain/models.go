@@ -18,6 +18,8 @@ type AccountSettings struct {
 	PersonalTagInference bool   `json:"personal_tag_inference"`
 	MonthlySalary        int64  `json:"monthly_salary,omitempty"`
 	PDFPassword          string `json:"pdf_password,omitempty"`
+	BankUser             string `json:"bank_user,omitempty"`
+	BankPassword         string `json:"bank_password,omitempty"`
 }
 
 // Scan implements sql.Scanner for PostgreSQL JSONB → AccountSettings.
@@ -81,7 +83,7 @@ type Transaction struct {
 	Source            string    `json:"source"                       db:"source"`
 	BankRawID         *string   `json:"-"                            db:"bank_raw_id"`
 	Currency          string    `json:"currency"                     db:"currency"`
-	CCStatementID     *int64    `json:"cc_statement_id,omitempty"    db:"cc_statement_id"`
+	CCBillID          *int64    `json:"cc_bill_id,omitempty"         db:"cc_bill_id"`
 	AccountID         *int64    `json:"account_id,omitempty"         db:"account_id"`
 	Tags              []string  `json:"tags"                         db:"tags"`
 	CreatedAt         time.Time `json:"created_at"                   db:"created_at"`
@@ -107,8 +109,8 @@ type UserTagEntry struct {
 	Color *string `json:"color,omitempty"`
 }
 
-// CreditCardStatement represents a single billing cycle for a credit card account.
-type CreditCardStatement struct {
+// CreditCardBill represents a single billing cycle for a credit card account.
+type CreditCardBill struct {
 	ID                int64            `json:"id"                    db:"id"`
 	ExternalAccountID string           `json:"external_account_id"   db:"external_account_id"`
 	PeriodFrom        time.Time        `json:"period_from"           db:"period_from"`
@@ -123,10 +125,10 @@ type CreditCardStatement struct {
 	CreatedAt         time.Time        `json:"created_at"            db:"created_at"`
 }
 
-// CreditCardItem is a single line on a credit card statement.
+// CreditCardItem is a single line on a credit card bill.
 type CreditCardItem struct {
 	ID                 int64     `json:"id"                            db:"id"`
-	StatementID        int64     `json:"statement_id"                  db:"statement_id"`
+	BillID             int64     `json:"bill_id"                       db:"bill_id"`
 	Date               time.Time `json:"date"                          db:"date"`
 	Description        string    `json:"description"                   db:"description"`
 	Amount             int64     `json:"amount"                        db:"amount"`

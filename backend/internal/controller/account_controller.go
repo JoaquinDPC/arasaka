@@ -41,6 +41,8 @@ type createAccountReq struct {
 	PersonalTagInference *bool         `json:"personal_tag_inference"`
 	MonthlySalary        *int64        `json:"monthly_salary"`
 	PDFPassword          string        `json:"pdf_password"`
+	BankUser             string        `json:"bank_user"`
+	BankPassword         string        `json:"bank_password"`
 }
 
 func (ctrl *AccountController) Create(c *gin.Context) {
@@ -72,6 +74,22 @@ func (ctrl *AccountController) Create(c *gin.Context) {
 		}
 		settings.PDFPassword = enc
 	}
+	if req.BankUser != "" {
+		enc, err := crypto.Encrypt(req.BankUser, ctrl.masterKey)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "encrypt bank_user: " + err.Error()})
+			return
+		}
+		settings.BankUser = enc
+	}
+	if req.BankPassword != "" {
+		enc, err := crypto.Encrypt(req.BankPassword, ctrl.masterKey)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "encrypt bank_password: " + err.Error()})
+			return
+		}
+		settings.BankPassword = enc
+	}
 
 	a, err := ctrl.svc.Create(c.Request.Context(), domain.CreateAccountParams{
 		UserID:   c.GetInt64(middleware.UserIDKey),
@@ -96,6 +114,8 @@ type updateAccountReq struct {
 	PersonalTagInference *bool          `json:"personal_tag_inference"`
 	MonthlySalary        *int64         `json:"monthly_salary"`
 	PDFPassword          *string        `json:"pdf_password"`
+	BankUser             *string        `json:"bank_user"`
+	BankPassword         *string        `json:"bank_password"`
 }
 
 func (ctrl *AccountController) Update(c *gin.Context) {
@@ -123,7 +143,9 @@ func (ctrl *AccountController) Update(c *gin.Context) {
 
 	// Build settings update by reading existing and overlaying request changes.
 	hasSettingsChange := req.AppTagInference != nil || req.PersonalTagInference != nil ||
-		req.MonthlySalary != nil || (req.PDFPassword != nil && *req.PDFPassword != "")
+		req.MonthlySalary != nil || (req.PDFPassword != nil && *req.PDFPassword != "") ||
+		(req.BankUser != nil && *req.BankUser != "") ||
+		(req.BankPassword != nil && *req.BankPassword != "")
 	if hasSettingsChange {
 		existing, err := ctrl.svc.GetByID(c.Request.Context(), id, userID)
 		if err != nil {
@@ -148,10 +170,26 @@ func (ctrl *AccountController) Update(c *gin.Context) {
 			}
 			settings.PDFPassword = enc
 		}
+		if req.BankUser != nil && *req.BankUser != "" {
+			enc, err := crypto.Encrypt(*req.BankUser, ctrl.masterKey)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "encrypt bank_user: " + err.Error()})
+				return
+			}
+			settings.BankUser = enc
+		}
+		if req.BankPassword != nil && *req.BankPassword != "" {
+			enc, err := crypto.Encrypt(*req.BankPassword, ctrl.masterKey)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "encrypt bank_password: " + err.Error()})
+				return
+			}
+			settings.BankPassword = enc
+		}
 		p.Settings = &settings
 	}
 
-	a, err := ctrl.svc.Update(c.Request.Context(), id, p)
+	a, err := ctrl.svc.Update(c.Request.Context(), id, userID, p)
 	if err != nil {
 		if err.Error() == "not found" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
@@ -167,13 +205,56 @@ func (ctrl *AccountController) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, a)
 }
 
+func (ctrl *AccountController) DeletePreview(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	userID := c.GetInt64(middleware.UserIDKey)
+	preview, err := ctrl.svc.DeletePreview(c.Request.Context(), id, userID)
+	if err != nil {
+		if err.Error() == "not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, preview)
+}
+
+type setOpeningBalanceReq struct {
+	Amount int64 `json:"amount"`
+}
+
+func (ctrl *AccountController) SetOpeningBalance(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var req setOpeningBalanceReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	userID := c.GetInt64(middleware.UserIDKey)
+	if err := ctrl.svc.UpsertOpeningBalance(c.Request.Context(), id, userID, req.Amount); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (ctrl *AccountController) Delete(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	if err := ctrl.svc.Delete(c.Request.Context(), id); err != nil {
+	userID := c.GetInt64(middleware.UserIDKey)
+	if err := ctrl.svc.DeleteCascade(c.Request.Context(), id, userID); err != nil {
 		if err.Error() == "not found" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return

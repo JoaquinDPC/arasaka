@@ -346,9 +346,9 @@ function ActiveInstallmentsPanel({ items }) {
   )
 }
 
-// ── Statement card ────────────────────────────────────────────────────────
+// ── Bill card ─────────────────────────────────────────────────────────────
 
-function StatementCard({ stmt }) {
+function BillCard({ stmt }) {
   const isIntl  = stmt.external_account_id === INTL_ID
   const label   = isIntl ? 'Tarjeta Internacional' : 'Tarjeta Nacional'
   const accent  = isIntl ? '#9b7fd4' : 'var(--accent)'
@@ -631,7 +631,7 @@ export default function CreditCard() {
     setError(null)
     try {
       const [list, installs] = await Promise.all([
-        api.ccStatements(),
+        api.ccBills(),
         api.installments(),
       ])
       setAllStmts(list ?? [])
@@ -679,7 +679,7 @@ export default function CreditCard() {
 
     setSummaryStmts(targets)
     setWithItems([])
-    Promise.all(targets.map(s => api.ccStatement(s.id)))
+    Promise.all(targets.map(s => api.ccBill(s.id)))
       .then(setWithItems)
       .catch(err => setError(err.message))
   }, [selectedPeriod, allStmts])
@@ -730,10 +730,10 @@ export default function CreditCard() {
         </div>
       )}
 
-      {/* Statement cards */}
+      {/* Bill cards */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         {stmtsWithItems.map(stmt => (
-          <StatementCard key={stmt.id} stmt={stmt} />
+          <BillCard key={stmt.id} stmt={stmt} />
         ))}
       </div>
     </div>

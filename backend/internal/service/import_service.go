@@ -2,15 +2,14 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"arasaka/internal/crypto"
 	"arasaka/internal/domain"
-	"arasaka/internal/importer"
 	"arasaka/internal/pdfparser"
-	"arasaka/internal/repository"
+	"arasaka/internal/util"
 )
 
 // supportedPDFBanks lists the bank_id values that have PDF parsers implemented.
@@ -28,6 +27,7 @@ type NamedPDF struct {
 // FileResult is the per-file outcome of a batch PDF import.
 type FileResult struct {
 	Filename   string     `json:"filename"`
+	DocType    pdfparser.PDFDocType `json:"doc_type,omitempty"`
 	Imported   int        `json:"imported"`
 	Duplicates int        `json:"duplicates"`
 	PeriodFrom *time.Time `json:"period_from,omitempty"`
@@ -46,45 +46,39 @@ type BatchResult struct {
 
 // ImportService handles PDF cartola imports.
 type ImportService struct {
-	db           *sql.DB
+	accounts     domain.AccountRepository
+	transactions domain.TransactionRepository
 	inferenceSvc *TagInferenceService
 	ccRepo       domain.CreditCardRepository
 	masterKey    []byte
 }
 
 // NewImportService creates a new ImportService.
-func NewImportService(db *sql.DB, inferenceSvc *TagInferenceService, ccRepo domain.CreditCardRepository, masterKey []byte) *ImportService {
-	return &ImportService{db: db, inferenceSvc: inferenceSvc, ccRepo: ccRepo, masterKey: masterKey}
+func NewImportService(accounts domain.AccountRepository, transactions domain.TransactionRepository, inferenceSvc *TagInferenceService, ccRepo domain.CreditCardRepository, masterKey []byte) *ImportService {
+	return &ImportService{
+		accounts:     accounts,
+		transactions: transactions,
+		inferenceSvc: inferenceSvc,
+		ccRepo:       ccRepo,
+		masterKey:    masterKey,
+	}
 }
 
 // ImportPDFs validates ownership and bank support once, then processes each PDF
 // file independently. A failure on one file does not abort the rest.
 func (s *ImportService) ImportPDFs(ctx context.Context, userID, accountID int64, files []NamedPDF) (BatchResult, error) {
-	// ── Ownership check (user-scoped) ─────────────────────────────────────────
-	var bankID domain.BankID
-	var dbUserID sql.NullInt64
-	var accountSettings domain.AccountSettings
-	row := s.db.QueryRowContext(ctx,
-		`SELECT bank_id, user_id, settings FROM accounts WHERE id = $1`, accountID)
-	if err := row.Scan(&bankID, &dbUserID, &accountSettings); err == sql.ErrNoRows {
-		return BatchResult{}, fmt.Errorf("forbidden")
-	} else if err != nil {
-		return BatchResult{}, fmt.Errorf("account lookup: %w", err)
-	}
-	if !dbUserID.Valid || dbUserID.Int64 != userID {
+	acct, err := s.accounts.GetByID(ctx, accountID, userID)
+	if err != nil {
 		return BatchResult{}, fmt.Errorf("forbidden")
 	}
 
-	// ── Bank support check ────────────────────────────────────────────────────
-	if !supportedPDFBanks[bankID] {
-		return BatchResult{}, fmt.Errorf("bank %q does not support PDF import", bankID)
+	if !supportedPDFBanks[acct.BankID] {
+		return BatchResult{}, fmt.Errorf("bank %q does not support PDF import", acct.BankID)
 	}
 
-	txRepo := repository.NewTransactionRepository(s.db)
-	result := BatchResult{AccountID: accountID, BankID: bankID}
-
+	result := BatchResult{AccountID: accountID, BankID: acct.BankID}
 	for _, f := range files {
-		fr := s.importOne(ctx, txRepo, userID, accountID, bankID, accountSettings, f)
+		fr := s.importOne(ctx, userID, accountID, acct.BankID, acct.Settings, f)
 		result.Files = append(result.Files, fr)
 		result.TotalImported += fr.Imported
 		result.TotalDuplicates += fr.Duplicates
@@ -96,7 +90,6 @@ func (s *ImportService) ImportPDFs(ctx context.Context, userID, accountID int64,
 // importOne dispatches to the bank-specific import path based on bank ID and PDF content.
 func (s *ImportService) importOne(
 	ctx context.Context,
-	txRepo domain.TransactionRepository,
 	userID, accountID int64,
 	bankID domain.BankID,
 	accountSettings domain.AccountSettings,
@@ -125,25 +118,37 @@ func (s *ImportService) importOne(
 		}
 		decoded := NamedPDF{Filename: f.Filename, Data: data}
 		switch docType {
-		case "credit_card":
-			return s.importOneCC(ctx, userID, accountID, decoded)
-		case "debit":
-			return s.importOneDebit(ctx, txRepo, userID, accountID, accountSettings, decoded, pdfparser.ParseBancoChile)
+		case pdfparser.DocTypeCreditCard:
+			fr := s.importOneCC(ctx, userID, accountID, decoded)
+			fr.DocType = pdfparser.DocTypeCreditCard
+			return fr
+		case pdfparser.DocTypeDebitMonthly:
+			fr := s.importOneDebit(ctx, userID, accountID, bankID, accountSettings, decoded, pdfparser.ParseBancoChile)
+			fr.DocType = docType
+			return fr
+		case pdfparser.DocTypeDebitPartial:
+			fr := s.importOneDebit(ctx, userID, accountID, bankID, accountSettings, decoded, pdfparser.ParseBancoChilePartial)
+			fr.DocType = docType
+			return fr
 		default:
 			return FileResult{Filename: f.Filename, Error: "unrecognized Banco de Chile PDF format"}
 		}
 	case domain.BankSantander:
-		return s.importOneDebit(ctx, txRepo, userID, accountID, accountSettings, f, pdfparser.ParseSantander)
+		fr := s.importOneDebit(ctx, userID, accountID, bankID, accountSettings, f, pdfparser.ParseSantander)
+		fr.DocType = pdfparser.DocTypeDebit
+		return fr
 	default:
 		return FileResult{Filename: f.Filename, Error: fmt.Sprintf("no PDF parser for bank %q", bankID)}
 	}
 }
 
-// importOneDebit parses a debit cartola PDF and inserts the resulting transactions.
+// importOneDebit parses a debit cartola PDF, standardizes rows to BankRecord,
+// applies cross-source dedup against existing bank_json records, then runs the
+// shared processDebitBatch pipeline (normalize + insert).
 func (s *ImportService) importOneDebit(
 	ctx context.Context,
-	txRepo domain.TransactionRepository,
 	userID, accountID int64,
+	bankID domain.BankID,
 	accountSettings domain.AccountSettings,
 	f NamedPDF,
 	parseFn func([]byte) (pdfparser.ParseResult, error),
@@ -160,36 +165,56 @@ func (s *ImportService) importOneDebit(
 		return fr
 	}
 
-	var params []domain.CreateTransactionParams
-	for _, row := range parsed.Rows {
-		rawID := importer.PDFRawID(accountID, row.Date, row.Amount, row.Description)
-		uid := userID
-		aid := accountID
-		params = append(params, domain.CreateTransactionParams{
-			Date:        row.Date,
-			Description: row.Description,
-			Flow:        row.Flow,
-			Amount:      row.Amount,
-			Currency:    "CLP",
-			Source:      "pdf",
-			BankRawID:   &rawID,
-			AccountID:   &aid,
-			UserID:      &uid,
-		})
+	// Step 1: standardize to BankRecord — canonical intermediate format.
+	externalID := fmt.Sprintf("pdf_%d", accountID)
+	bankRecords := PDFRowsToBankRecords(parsed.Rows, externalID)
+
+	// Step 2: cross-source dedup — skip rows already imported via bank_json.
+	// bank_json candidates in DB have cleaned descriptions, so compare on cleaned form.
+	var minDate, maxDate time.Time
+	for _, r := range bankRecords {
+		d, _ := util.ParseDate(r.Date)
+		if minDate.IsZero() || d.Before(minDate) {
+			minDate = d
+		}
+		if maxDate.IsZero() || d.After(maxDate) {
+			maxDate = d
+		}
+	}
+	candidates, err := s.transactions.DedupCandidates(ctx, accountID, minDate, maxDate)
+	if err != nil {
+		fr.Error = fmt.Sprintf("cross-source dedup check: %s", err)
+		return fr
 	}
 
-	if s.inferenceSvc != nil {
-		params = s.inferenceSvc.AutoTagBatch(ctx, userID, accountSettings, params)
+	preDupes := 0
+	var filtered []BankRecord
+	for _, r := range bankRecords {
+		date, _ := util.ParseDate(r.Date)
+		amount, _ := util.ParseAbsAmountCLP(r.Amount)
+		flow := "EXPENSE"
+		if r.TransactionType == "Abono" {
+			flow = "INCOME"
+		}
+		cleanDesc := util.CleanDescription(bankID, r.Description)
+		if matchesBankJSON(date, amount, flow, cleanDesc, candidates) {
+			preDupes++
+			continue
+		}
+		filtered = append(filtered, r)
 	}
 
-	imported, dupes, err := txRepo.CreateBatch(ctx, params)
+	// Step 3: shared pipeline — normalize (clean desc + tags) + insert.
+	// fromDate is zero: PDFs are already date-bounded by their content.
+	imported, dupes, err := processDebitBatch(ctx, s.transactions, s.inferenceSvc, nil,
+		userID, accountID, accountSettings, bankID, filtered, time.Time{})
 	if err != nil {
 		fr.Error = fmt.Sprintf("insert error: %s", err)
 		return fr
 	}
 
 	fr.Imported = imported
-	fr.Duplicates = dupes
+	fr.Duplicates = dupes + preDupes
 	if !parsed.PeriodFrom.IsZero() {
 		fr.PeriodFrom = &parsed.PeriodFrom
 	}
@@ -197,6 +222,55 @@ func (s *ImportService) importOneDebit(
 		fr.PeriodTo = &parsed.PeriodTo
 	}
 	return fr
+}
+
+// matchesBankJSON returns true if any candidate matches the given (date, amount, flow).
+//
+// bank_json candidates: allows up to 2-day date offset (transfers initiated on the PDF
+// transaction date may post 1–2 business days later in the bank API). No description
+// check — descriptions differ structurally between fintself API output and PDF text.
+//
+// pdf candidates: requires exact date + description substring match to avoid false positives
+// when two distinct transactions share the same day and amount.
+func matchesBankJSON(date time.Time, amount int64, flow, description string, candidates []domain.DedupCandidate) bool {
+	nd := normalizeDesc(description)
+	for _, c := range candidates {
+		if c.Amount != amount || c.Flow != flow {
+			continue
+		}
+		if c.Source == "bank_json" {
+			diff := c.Date.Sub(date)
+			if diff < 0 {
+				diff = -diff
+			}
+			if diff <= 2*24*time.Hour {
+				return true
+			}
+			continue
+		}
+		if !c.Date.Equal(date) {
+			continue
+		}
+		nc := normalizeDesc(c.Description)
+		if len(nd) < 6 || len(nc) < 6 {
+			continue
+		}
+		if strings.Contains(nd, nc) || strings.Contains(nc, nd) {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeDesc strips non-alphanumeric characters and uppercases for comparison.
+func normalizeDesc(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(s) {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // decryptAccountPDF retrieves and decrypts the PDF password stored in account settings.
@@ -226,12 +300,12 @@ func (s *ImportService) importOneCC(ctx context.Context, userID, accountID int64
 	aid := accountID
 	uid := userID
 
-	for _, section := range []*pdfparser.CCStatementData{result.National, result.International} {
+	for _, section := range []*pdfparser.CCBillData{result.National, result.International} {
 		if section == nil || section.PeriodFrom.IsZero() {
 			continue
 		}
 
-		stmt, err := s.ccRepo.UpsertStatement(ctx, domain.CreateCCStatementParams{
+		bill, err := s.ccRepo.UpsertBill(ctx, domain.CreateCCBillParams{
 			ExternalAccountID: section.ExternalAccountID,
 			PeriodFrom:        section.PeriodFrom,
 			PeriodTo:          section.PeriodTo,
@@ -242,14 +316,14 @@ func (s *ImportService) importOneCC(ctx context.Context, userID, accountID int64
 			UserID:            &uid,
 		})
 		if err != nil {
-			fr.Error = fmt.Sprintf("upsert statement %s: %s", section.ExternalAccountID, err)
+			fr.Error = fmt.Sprintf("upsert bill %s: %s", section.ExternalAccountID, err)
 			return fr
 		}
 
 		var itemParams []domain.CreateCCItemParams
 		for _, it := range section.Items {
 			itemParams = append(itemParams, domain.CreateCCItemParams{
-				StatementID:        stmt.ID,
+				BillID:             bill.ID,
 				Date:               it.Date,
 				Description:        it.Description,
 				Amount:             it.Amount,

@@ -90,7 +90,9 @@ export const api = {
   accounts:      ()          => get('/accounts'),
   createAccount: (body)      => post('/accounts', body),
   updateAccount: (id, body)  => put(`/accounts/${id}`, body),
-  deleteAccount: (id)        => del(`/accounts/${id}`),
+  deleteAccount:        (id) => del(`/accounts/${id}`),
+  accountDeletePreview:   (id)          => get(`/accounts/${id}/delete-preview`),
+  setOpeningBalance:      (id, amount)  => put(`/accounts/${id}/opening-balance`, { amount }),
 
   // Tags
   tags:              ()            => get('/tags'),
@@ -128,8 +130,8 @@ export const api = {
   installments: () => get('/reports/installments'),
 
   // Credit card
-  ccStatements:   ()         => get('/credit-card/statements'),
-  ccStatement:    (id)       => get(`/credit-card/statements/${id}`),
+  ccBills:        ()         => get('/credit-card/bills'),
+  ccBill:         (id)       => get(`/credit-card/bills/${id}`),
   ccImportPDF:    (formData) => fetch('/api/credit-card/import-pdf', { method: 'POST', body: formData, headers: authHeaders() }).then(r => { if (!r.ok) return r.json().then(e => { throw new Error(e.error || r.status) }); return r.json() }),
   ccLinkPayments: ()         => post('/credit-card/link-payments', {}),
 }

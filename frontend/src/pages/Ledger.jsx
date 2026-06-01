@@ -8,7 +8,7 @@ import Spinner from '../components/Spinner'
 import CatIcon from '../components/CatIcon'
 import CustomSelect from '../components/CustomSelect'
 import DatePicker from '../components/DatePicker'
-import CCStatementSection from '../components/CCStatementSection'
+import CCBillSection from '../components/CCBillSection'
 import { useAccount } from '../context/AccountContext'
 
 // Tags stored as "First-letter-uppercase-rest-lowercase" (e.g. "Sueldo", "Comida-mascota").
@@ -454,7 +454,7 @@ function EditModal({ tx, onClose, onUpdate, recognizedTags, usedTags, selectedAc
           </div>
         </div>
 
-        {tx.cc_statement_id && <CCStatementSection statementId={tx.cc_statement_id} />}
+        {tx.cc_bill_id && <CCBillSection billId={tx.cc_bill_id} />}
         <div className="mfooter">
           <button className="btn-ghost" onClick={onClose}>Cancelar</button>
           <button className="btn-gold" onClick={save}>Guardar cambios</button>
@@ -535,7 +535,7 @@ const TransactionRowDesktop = memo(function TransactionRowDesktop({ tx, selected
       <td className="col-key" style={{ maxWidth: 130 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }} title={tx.description}>{tx.description}</div>
-          {tx.cc_statement_id && <span title="Ver detalle TC" style={{ fontSize: 11, flexShrink: 0 }}>📄</span>}
+          {tx.cc_bill_id && <span title="Ver detalle TC" style={{ fontSize: 11, flexShrink: 0 }}>📄</span>}
         </div>
         {tx.custom_description && (
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tx.custom_description}>{tx.custom_description}</div>
@@ -566,16 +566,22 @@ const TransactionRowDesktop = memo(function TransactionRowDesktop({ tx, selected
         </div>
       </td>
       <td>
-        <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 4,
-          background: tx.flow === 'INCOME' ? 'rgba(76,175,125,.15)' : 'rgba(224,92,92,.15)',
-          color: tx.flow === 'INCOME' ? 'var(--green)' : 'var(--red)',
-        }}>
-          {tx.flow === 'INCOME' ? 'INGRESO' : tx.flow === 'INVEST' ? 'INVERSIÓN' : 'EGRESO'}
-        </span>
+        {tx.flow === 'OPENING' ? (
+          <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 4,
+            background: 'var(--accent-dim)', color: 'var(--accent)',
+          }}>SALDO INICIAL</span>
+        ) : (
+          <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 4,
+            background: tx.flow === 'INCOME' ? 'rgba(76,175,125,.15)' : 'rgba(224,92,92,.15)',
+            color: tx.flow === 'INCOME' ? 'var(--green)' : 'var(--red)',
+          }}>
+            {tx.flow === 'INCOME' ? 'INGRESO' : tx.flow === 'INVEST' ? 'INVERSIÓN' : 'EGRESO'}
+          </span>
+        )}
       </td>
       <td className="td-mono" style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700 }}>
-        <span style={{ color: isSalary ? 'var(--accent)' : tx.flow === 'INCOME' ? 'var(--green)' : 'var(--red)' }}>
-          {isSalary ? '✦ ' : (tx.flow === 'INCOME' ? '+' : '-')}{formatCLP(tx.amount)}
+        <span style={{ color: tx.flow === 'OPENING' ? 'var(--accent)' : isSalary ? 'var(--accent)' : tx.flow === 'INCOME' ? 'var(--green)' : 'var(--red)' }}>
+          {tx.flow === 'OPENING' ? '' : isSalary ? '✦ ' : (tx.flow === 'INCOME' ? '+' : '-')}{formatCLP(tx.amount)}
         </span>
       </td>
       {selectedId && (
@@ -596,14 +602,14 @@ const TransactionCardMobile = memo(function TransactionCardMobile({ tx, selected
       <div className="tx-card-top">
         <span className="tx-card-date">{formatDate(tx.date)}</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span className="tx-card-amt" style={{ color: isSalaryCard ? 'var(--accent)' : isIncome ? 'var(--green)' : 'var(--red)' }}>
-            {isSalaryCard ? '✦ ' : (isIncome ? '+' : '-')}{formatCLP(tx.amount)}
+          <span className="tx-card-amt" style={{ color: tx.flow === 'OPENING' ? 'var(--accent)' : isSalaryCard ? 'var(--accent)' : isIncome ? 'var(--green)' : 'var(--red)' }}>
+            {tx.flow === 'OPENING' ? '' : isSalaryCard ? '✦ ' : (isIncome ? '+' : '-')}{formatCLP(tx.amount)}
           </span>
         </div>
       </div>
       <div className="tx-card-desc" style={{ color: 'var(--accent)', fontFamily: 'var(--mono)', fontSize: 11 }}>
         {tx.description}
-        {tx.cc_statement_id && <span title="Ver detalle TC" style={{ fontSize: 11, marginLeft: 5 }}>📄</span>}
+        {tx.cc_bill_id && <span title="Ver detalle TC" style={{ fontSize: 11, marginLeft: 5 }}>📄</span>}
         {tx.custom_description && <span style={{ color: 'var(--text-dim)', marginLeft: 6 }}>{tx.custom_description}</span>}
       </div>
       {tx.notes && (
@@ -711,20 +717,20 @@ export default function Ledger() {
   // Reset to page 1 whenever filters or page size change
   useEffect(() => { setPage(1) }, [search, selectedTags, flow, dateFrom, dateTo, year, pageSize])
 
-  // Compute running_balance from the account's current balance (newest → oldest).
-  // This avoids a window-function CTE in the backend; the account balance is always
-  // available from AccountContext and is mathematically equivalent.
+  // Compute running_balance forward from $0 (oldest → newest) so the first
+  // transaction shows the actual accumulated balance at that point in time.
   const txsWithBalance = useMemo(() => {
     if (!selectedAccount || !selectedId) return transactions
-    let balance = selectedAccount.balance
-    return transactions.map(tx => {
-      const rb = balance
+    const sorted = [...transactions].reverse()
+    let balance = 0
+    const withBal = sorted.map(tx => {
       const effect = tx.flow === 'INCOME' || tx.flow === 'OPENING'
         ? tx.amount
         : tx.flow === 'EXPENSE' ? -tx.amount : 0
-      balance -= effect
-      return { ...tx, running_balance: rb }
+      balance += effect
+      return { ...tx, running_balance: balance }
     })
+    return withBal.reverse()
   }, [transactions, selectedAccount, selectedId])
 
   // Pre-compute lowercase search fields once when transactions load, not on every keystroke

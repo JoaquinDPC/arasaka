@@ -48,11 +48,10 @@ func (s *TagInferenceService) InferTags(ctx context.Context, userID, accountID i
 	var suggestions []domain.TagSuggestion
 	var customDescription *string
 
-	// Always fetch personal history — custom description is independent of inference settings.
-	personalEntry, err := s.userRules.Match(ctx, userID, key)
-	if err == nil && personalEntry != nil {
-		customDescription = personalEntry.CustomDescription
-		if settings.PersonalTagInference {
+	if settings.PersonalTagInference {
+		personalEntry, err := s.userRules.Match(ctx, userID, key)
+		if err == nil && personalEntry != nil {
+			customDescription = personalEntry.CustomDescription
 			for _, tag := range personalEntry.Tags {
 				if _, dup := seen[tag]; !dup {
 					seen[tag] = struct{}{}

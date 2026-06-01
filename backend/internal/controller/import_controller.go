@@ -15,7 +15,7 @@ import (
 const (
 	maxTotalMemory = 64 << 20 // 64 MB total multipart memory
 	maxFileSize    = 10 << 20 // 10 MB per file
-	maxFiles       = 20
+	maxFiles       = 12
 )
 
 // ImportController handles PDF cartola upload and import.

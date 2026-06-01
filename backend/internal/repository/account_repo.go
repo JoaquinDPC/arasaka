@@ -100,7 +100,7 @@ func (r *accountRepo) Create(ctx context.Context, p domain.CreateAccountParams) 
 	return a, err
 }
 
-func (r *accountRepo) Update(ctx context.Context, id int64, p domain.UpdateAccountParams) (domain.Account, error) {
+func (r *accountRepo) Update(ctx context.Context, id int64, userID int64, p domain.UpdateAccountParams) (domain.Account, error) {
 	set := ""
 	var args []any
 	n := 1
@@ -137,11 +137,12 @@ func (r *accountRepo) Update(ctx context.Context, id int64, p domain.UpdateAccou
 	args = append(args, time.Now())
 	n++
 	args = append(args, id)
+	args = append(args, userID)
 
 	query := fmt.Sprintf(`
-		UPDATE accounts SET %s WHERE id = $%d
+		UPDATE accounts SET %s WHERE id = $%d AND user_id = $%d
 		RETURNING id, bank_id, name, type, currency, settings, created_at, updated_at
-	`, set, n)
+	`, set, n, n+1)
 
 	var a domain.Account
 	err := r.db.QueryRowContext(ctx, query, args...).Scan(
@@ -153,8 +154,8 @@ func (r *accountRepo) Update(ctx context.Context, id int64, p domain.UpdateAccou
 	return a, err
 }
 
-func (r *accountRepo) Delete(ctx context.Context, id int64) error {
-	res, err := r.db.ExecContext(ctx, "DELETE FROM accounts WHERE id = $1", id)
+func (r *accountRepo) Delete(ctx context.Context, id int64, userID int64) error {
+	res, err := r.db.ExecContext(ctx, "DELETE FROM accounts WHERE id = $1 AND user_id = $2", id, userID)
 	if err != nil {
 		return err
 	}
@@ -165,34 +166,44 @@ func (r *accountRepo) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (r *accountRepo) DeletePreview(ctx context.Context, id int64) (domain.AccountDeletePreview, error) {
+func (r *accountRepo) DeletePreview(ctx context.Context, id int64, userID int64) (domain.AccountDeletePreview, error) {
+	var exists bool
+	if err := r.db.QueryRowContext(ctx,
+		"SELECT EXISTS(SELECT 1 FROM accounts WHERE id = $1 AND user_id = $2)", id, userID,
+	).Scan(&exists); err != nil {
+		return domain.AccountDeletePreview{}, err
+	}
+	if !exists {
+		return domain.AccountDeletePreview{}, fmt.Errorf("not found")
+	}
 	var p domain.AccountDeletePreview
 	err := r.db.QueryRowContext(ctx, `
 		SELECT
 			(SELECT COUNT(*) FROM transactions        WHERE account_id = $1),
-			(SELECT COUNT(*) FROM credit_card_statements WHERE account_id = $1),
+			(SELECT COUNT(*) FROM credit_card_bills WHERE account_id = $1),
 			(SELECT COUNT(*) FROM credit_card_items   WHERE account_id = $1)
-	`, id).Scan(&p.Transactions, &p.CCStatements, &p.CCItems)
+	`, id).Scan(&p.Transactions, &p.CCBills, &p.CCItems)
 	return p, err
 }
 
-func (r *accountRepo) DeleteCascade(ctx context.Context, id int64) error {
+func (r *accountRepo) DeleteCascade(ctx context.Context, id int64, userID int64) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	if _, err = tx.ExecContext(ctx, "DELETE FROM credit_card_items       WHERE account_id = $1", id); err != nil {
+	owned := "(SELECT id FROM accounts WHERE id = $1 AND user_id = $2)"
+	if _, err = tx.ExecContext(ctx, "DELETE FROM credit_card_items     WHERE account_id IN "+owned, id, userID); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, "DELETE FROM credit_card_statements   WHERE account_id = $1", id); err != nil {
+	if _, err = tx.ExecContext(ctx, "DELETE FROM credit_card_bills WHERE account_id IN "+owned, id, userID); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, "DELETE FROM transactions             WHERE account_id = $1", id); err != nil {
+	if _, err = tx.ExecContext(ctx, "DELETE FROM transactions           WHERE account_id IN "+owned, id, userID); err != nil {
 		return err
 	}
-	res, err := tx.ExecContext(ctx, "DELETE FROM accounts WHERE id = $1", id)
+	res, err := tx.ExecContext(ctx, "DELETE FROM accounts WHERE id = $1 AND user_id = $2", id, userID)
 	if err != nil {
 		return err
 	}

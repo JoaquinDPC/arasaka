@@ -2,40 +2,37 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"os/exec"
 
 	"arasaka/internal/domain"
-	"arasaka/internal/importer"
 	"arasaka/internal/pdfparser"
 )
 
 type CreditCardService struct {
 	repo domain.CreditCardRepository
-	db   *sql.DB
 }
 
-func NewCreditCardService(repo domain.CreditCardRepository, db *sql.DB) *CreditCardService {
-	return &CreditCardService{repo: repo, db: db}
+func NewCreditCardService(repo domain.CreditCardRepository) *CreditCardService {
+	return &CreditCardService{repo: repo}
 }
 
-func (s *CreditCardService) ListStatements(ctx context.Context, userID int64) ([]domain.CreditCardStatement, error) {
-	return s.repo.ListStatements(ctx, userID)
+func (s *CreditCardService) ListBills(ctx context.Context, userID int64, accountID int64) ([]domain.CreditCardBill, error) {
+	return s.repo.ListBills(ctx, userID, accountID)
 }
 
-func (s *CreditCardService) GetStatement(ctx context.Context, id int64, userID int64) (domain.CreditCardStatement, error) {
-	return s.repo.GetStatementByID(ctx, id, userID)
+func (s *CreditCardService) GetBill(ctx context.Context, id int64, userID int64) (domain.CreditCardBill, error) {
+	return s.repo.GetBillByID(ctx, id, userID)
 }
 
-func (s *CreditCardService) LinkPayments(ctx context.Context) error {
-	return importer.LinkAllStatements(ctx, s.db)
+func (s *CreditCardService) LinkPayments(ctx context.Context, userID int64, accountID int64, bankID domain.BankID) error {
+	return s.repo.LinkAllBills(ctx, userID, accountID, bankID)
 }
 
 // ImportPDF parses a Banco de Chile CC statement PDF and persists the results.
 // If password is non-empty the PDF is decrypted via pikepdf before parsing.
-func (s *CreditCardService) ImportPDF(ctx context.Context, userID int64, pdfData []byte, password string) (imported, duplicates int, err error) {
+func (s *CreditCardService) ImportPDF(ctx context.Context, userID int64, pdfData []byte, password string, accountID int64) (imported, duplicates int, err error) {
 	data := pdfData
 	if password != "" {
 		data, err = decryptPDF(pdfData, password)
@@ -49,12 +46,12 @@ func (s *CreditCardService) ImportPDF(ctx context.Context, userID int64, pdfData
 		return 0, 0, fmt.Errorf("parse pdf: %w", err)
 	}
 
-	for _, section := range []*pdfparser.CCStatementData{result.National, result.International} {
+	for _, section := range []*pdfparser.CCBillData{result.National, result.International} {
 		if section == nil || section.PeriodFrom.IsZero() {
 			continue
 		}
 
-		stmt, err := s.repo.UpsertStatement(ctx, domain.CreateCCStatementParams{
+		bill, err := s.repo.UpsertBill(ctx, domain.CreateCCBillParams{
 			ExternalAccountID: section.ExternalAccountID,
 			PeriodFrom:        section.PeriodFrom,
 			PeriodTo:          section.PeriodTo,
@@ -64,13 +61,13 @@ func (s *CreditCardService) ImportPDF(ctx context.Context, userID int64, pdfData
 			UserID:            &userID,
 		})
 		if err != nil {
-			return imported, duplicates, fmt.Errorf("upsert statement %s: %w", section.ExternalAccountID, err)
+			return imported, duplicates, fmt.Errorf("upsert bill %s: %w", section.ExternalAccountID, err)
 		}
 
 		var itemParams []domain.CreateCCItemParams
 		for _, it := range section.Items {
 			itemParams = append(itemParams, domain.CreateCCItemParams{
-				StatementID:        stmt.ID,
+				BillID:             bill.ID,
 				Date:               it.Date,
 				Description:        it.Description,
 				Amount:             it.Amount,
@@ -94,7 +91,7 @@ func (s *CreditCardService) ImportPDF(ctx context.Context, userID int64, pdfData
 	}
 
 	// Non-fatal: attempt to link CC payments to bank transactions.
-	_ = importer.LinkAllStatements(ctx, s.db)
+	_ = s.repo.LinkAllBills(ctx, userID, accountID, domain.BankBancoDeChile)
 
 	return imported, duplicates, nil
 }

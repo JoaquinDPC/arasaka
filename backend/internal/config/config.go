@@ -12,10 +12,6 @@ type Config struct {
 	ServerPort         string `yaml:"server_port"`
 	JWTSecret          string `yaml:"jwt_secret"`
 	MasterKey          string `yaml:"master_key"`
-	BancochileUser     string `yaml:"bancochile_user"`
-	BancochilePassword string `yaml:"bancochile_password"`
-	SantanderUser      string `yaml:"santander_user"`
-	SantanderPassword  string `yaml:"santander_password"`
 	DevBypassAuth      bool   `yaml:"dev_bypass_auth"`
 }
 

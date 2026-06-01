@@ -430,7 +430,7 @@ backend/
 │   │   ├── auth_service.go
 │   │   ├── account_service.go
 │   │   ├── transaction_service.go
-│   │   ├── budget_service.go
+│   │   ├── tag_service.go
 │   │   ├── report_service.go
 │   │   ├── insight_service.go
 │   │   ├── sync_service.go       # fintself orchestration

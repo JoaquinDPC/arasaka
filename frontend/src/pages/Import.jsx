@@ -12,6 +12,15 @@ function formatPeriod(from, to) {
   return formatDate(from || to)
 }
 
+function docTypeLabel(dt) {
+  switch (dt) {
+    case 'debit_monthly': return 'Cuenta corriente · mes completo'
+    case 'debit_partial': return 'Cuenta corriente · parcial'
+    case 'credit_card':   return 'Tarjeta de crédito'
+    default: return null
+  }
+}
+
 function FileStatusIcon({ result }) {
   if (result.error) return <span style={{ color: 'var(--red)' }}>✕</span>
   if (result.duplicates > 0 && result.imported === 0)
@@ -63,7 +72,7 @@ function DropZone({ files, onAdd, onRemove, disabled }) {
           Arrastra PDFs aquí o haz clic para seleccionar
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-          Máx 20 archivos · 10 MB cada uno · Solo PDF
+          Máx 12 archivos · 10 MB cada uno · Solo PDF
         </div>
         <input
           ref={inputRef}
@@ -148,8 +157,20 @@ function ResultPanel({ result }) {
           }}>
             <FileStatusIcon result={fr} />
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {fr.filename}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {fr.filename}
+                </span>
+                {fr.doc_type && !fr.error && (
+                  <span style={{
+                    fontSize: 9, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase',
+                    color: 'var(--accent)', background: 'var(--accent-dim)',
+                    border: '1px solid rgba(201,168,76,.2)',
+                    borderRadius: 4, padding: '1px 5px', whiteSpace: 'nowrap', flexShrink: 0,
+                  }}>
+                    {docTypeLabel(fr.doc_type)}
+                  </span>
+                )}
               </div>
               {fr.error
                 ? <div style={{ fontSize: 10, color: 'var(--red)' }}>{fr.error}</div>
@@ -183,7 +204,7 @@ export default function Import() {
   const isSupported = selectedAccount && SUPPORTED_BANKS.some(b => b.id === selectedAccount.bank_id)
 
   function addFiles(newFiles) {
-    setFiles(prev => [...prev, ...newFiles].slice(0, 20))
+    setFiles(prev => [...prev, ...newFiles].slice(0, 12))
     setResult(null)
     setError(null)
   }

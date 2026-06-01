@@ -444,7 +444,7 @@ function AccountModal({ account, onSave, onDelete, onClose }) {
 }
 
 function DeleteConfirmModal({ account, preview, onConfirm, onClose, deleting }) {
-  const total = preview.transactions + preview.cc_statements + preview.cc_items
+  const total = preview.transactions + preview.cc_bills + preview.cc_items
   return (
     <div className="overlay fade" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={{ width: 420 }}>
@@ -460,7 +460,7 @@ function DeleteConfirmModal({ account, preview, onConfirm, onClose, deleting }) 
         <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
           {[
             ['Transacciones', preview.transactions],
-            ['Estados TC', preview.cc_statements],
+            ['Estados TC', preview.cc_bills],
             ['Ítems TC', preview.cc_items],
           ].map(([label, count]) => (
             <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
@@ -532,7 +532,7 @@ export default function Accounts() {
     } catch {
       // fallback: show modal with zero counts still lets user confirm
       setModal(false)
-      setDeleteConfirm({ account, preview: { transactions: 0, cc_statements: 0, cc_items: 0 } })
+      setDeleteConfirm({ account, preview: { transactions: 0, cc_bills: 0, cc_items: 0 } })
     }
   }
 

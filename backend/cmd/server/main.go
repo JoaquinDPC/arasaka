@@ -79,22 +79,22 @@ func main() {
 
 	// ── Services (business logic) ──────────────────────────────────────────────────────────
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
-	accountSvc := service.NewAccountService(accountRepo)
-	budgetSvc := service.NewBudgetService(userTagRepo, tagBudgetRepo)
+	accountSvc := service.NewAccountService(accountRepo, txRepo)
+	tagSvc := service.NewTagService(userTagRepo, tagBudgetRepo)
 	adminTagRuleSvc := service.NewAdminTagRuleService(appTagRuleRepo, tagHistoryRepo)
 	inferenceSvc := service.NewTagInferenceService(appTagRuleRepo, tagHistoryRepo, accountRepo)
 	txSvc := service.NewTransactionService(txRepo, userTagRepo, inferenceSvc)
 	reportSvc := service.NewReportService(reportRepo)
-	syncSvc := service.NewSyncService(db, cfg.BancochileUser, cfg.BancochilePassword, cfg.SantanderUser, cfg.SantanderPassword, inferenceSvc, log)
-	importSvc := service.NewImportService(db, inferenceSvc, ccRepo, masterKey)
-	ccSvc := service.NewCreditCardService(ccRepo, db)
+	syncSvc := service.NewSyncService(accountRepo, txRepo, ccRepo, masterKey, inferenceSvc, log)
+	importSvc := service.NewImportService(accountRepo, txRepo, inferenceSvc, ccRepo, masterKey)
+	ccSvc := service.NewCreditCardService(ccRepo)
 
 	// ── Controllers (HTTP handlers) ──────────────────────────────────────────────────────────
 	ctrl := Controllers{
 		Auth:         controller.NewAuthController(authSvc),
 		Accounts:     controller.NewAccountController(accountSvc, masterKey),
 		Transactions: controller.NewTransactionController(txSvc),
-		Budgets:      controller.NewBudgetController(budgetSvc),
+		Tags:         controller.NewTagController(tagSvc),
 		Reports:      controller.NewReportController(reportSvc),
 		Insights:     controller.NewInsightController(reportSvc),
 		Sync:         controller.NewSyncController(syncSvc),

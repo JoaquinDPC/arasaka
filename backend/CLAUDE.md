@@ -46,11 +46,19 @@ DATABASE_URL=postgres://bancochile:bancochile@localhost:5432/bancochile?sslmode=
 
 ## Architecture
 
-**Flow:** `main.go` → `fetchMovements()` → `insertMovements()`
+Hexagonal (ports & adapters). Three layers:
 
-- `fintself.go` — runs `fintself scrape cl_banco_chile --output-file <tmp.json>`, passes credentials as env vars (`CL_BANCO_CHILE_USER`, `CL_BANCO_CHILE_PASSWORD`), reads the JSON output into `[]Movement`.
-- `db.go` — connects to Postgres, runs SQL migrations from `migrations/*.sql` in order (tracked in `schema_migrations` table), then bulk-inserts movements. Duplicates are silently ignored via `ON CONFLICT ON CONSTRAINT movements_dedup DO NOTHING`.
-- `config.go` — reads `.env` then falls back to real env vars. `.env` never overrides an already-set env var.
+- **`internal/domain`** — entities, commands, ports (interfaces). No DB imports.
+- **`internal/repository`** — postgres adapters implementing domain ports. All SQL lives here.
+- **`internal/service`** — business logic. Depends only on domain interfaces, never on `*sql.DB` or concrete repo types.
+- **`internal/controller`** — Gin HTTP handlers. Depend only on services.
+- **`cmd/server/main.go`** — wires repos → services → controllers.
+
+### Dependency injection rule
+
+Services receive all dependencies (repositories, other services) via constructor injection.  
+**Never** instantiate a repository inside a service. **Never** pass `*sql.DB` directly to a service.  
+All DB access goes through a `domain.*Repository` interface.
 
 ## fintself patch
 

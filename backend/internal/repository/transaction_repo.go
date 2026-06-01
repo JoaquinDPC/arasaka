@@ -19,13 +19,13 @@ func NewTransactionRepository(db *sql.DB) domain.TransactionRepository {
 	return &transactionRepo{db: db}
 }
 
-const txColumns = `id, date, description, flow, custom_description, amount, notes, source, bank_raw_id, currency, cc_statement_id, account_id, tags, created_at, updated_at, user_id`
+const txColumns = `id, date, description, flow, custom_description, amount, notes, source, bank_raw_id, currency, cc_bill_id, account_id, tags, created_at, updated_at, user_id`
 
 func scanTx(s interface{ Scan(...any) error }, t *domain.Transaction) error {
 	return s.Scan(
 		&t.ID, &t.Date, &t.Description, &t.Flow,
 		&t.CustomDescription, &t.Amount, &t.Notes,
-		&t.Source, &t.BankRawID, &t.Currency, &t.CCStatementID, &t.AccountID,
+		&t.Source, &t.BankRawID, &t.Currency, &t.CCBillID, &t.AccountID,
 		pq.Array(&t.Tags),
 		&t.CreatedAt, &t.UpdatedAt, &t.UserID,
 	)
@@ -133,7 +133,7 @@ func (r *transactionRepo) Create(ctx context.Context, p domain.CreateTransaction
 	), &t)
 }
 
-func (r *transactionRepo) Update(ctx context.Context, id int64, p domain.UpdateTransactionParams) (domain.Transaction, error) {
+func (r *transactionRepo) Update(ctx context.Context, id int64, userID int64, p domain.UpdateTransactionParams) (domain.Transaction, error) {
 	set := ""
 	var args []any
 	n := 1
@@ -175,9 +175,10 @@ func (r *transactionRepo) Update(ctx context.Context, id int64, p domain.UpdateT
 	args = append(args, time.Now())
 	n++
 	args = append(args, id)
+	args = append(args, userID)
 
 	query := fmt.Sprintf(`
-		UPDATE transactions SET %s WHERE id = $%d RETURNING `+txColumns, set, n)
+		UPDATE transactions SET %s WHERE id = $%d AND user_id = $%d RETURNING `+txColumns, set, n, n+1)
 
 	var t domain.Transaction
 	if err := scanTx(r.db.QueryRowContext(ctx, query, args...), &t); err != nil {
@@ -189,31 +190,14 @@ func (r *transactionRepo) Update(ctx context.Context, id int64, p domain.UpdateT
 	return t, nil
 }
 
-func (r *transactionRepo) ListUsedTags(ctx context.Context, userID int64, limit int) ([]string, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT unnest(tags) AS tag
-		FROM transactions
-		WHERE user_id = $1
-		GROUP BY tag
-		ORDER BY count(*) DESC
-		LIMIT $2
-	`, userID, limit)
-	if err != nil {
-		return nil, err
+func (r *transactionRepo) GetByID(ctx context.Context, id int64, userID int64) (domain.Transaction, error) {
+	var t domain.Transaction
+	err := scanTx(r.db.QueryRowContext(ctx,
+		"SELECT "+txColumns+" FROM transactions WHERE id = $1 AND user_id = $2", id, userID), &t)
+	if err == sql.ErrNoRows {
+		return domain.Transaction{}, fmt.Errorf("not found")
 	}
-	defer rows.Close()
-	var tags []string
-	for rows.Next() {
-		var t string
-		if err := rows.Scan(&t); err != nil {
-			return nil, err
-		}
-		tags = append(tags, t)
-	}
-	if tags == nil {
-		tags = []string{}
-	}
-	return tags, rows.Err()
+	return t, err
 }
 
 func (r *transactionRepo) TagSpending(ctx context.Context, userID int64, year, month int, accountID *int64) ([]domain.TagSummary, error) {
@@ -255,8 +239,8 @@ func (r *transactionRepo) TagSpending(ctx context.Context, userID int64, year, m
 	return result, rows.Err()
 }
 
-func (r *transactionRepo) Delete(ctx context.Context, id int64) error {
-	res, err := r.db.ExecContext(ctx, "DELETE FROM transactions WHERE id = $1", id)
+func (r *transactionRepo) Delete(ctx context.Context, id int64, userID int64) error {
+	res, err := r.db.ExecContext(ctx, "DELETE FROM transactions WHERE id = $1 AND user_id = $2", id, userID)
 	if err != nil {
 		return err
 	}
@@ -265,6 +249,29 @@ func (r *transactionRepo) Delete(ctx context.Context, id int64) error {
 		return fmt.Errorf("not found")
 	}
 	return nil
+}
+
+func (r *transactionRepo) UpsertOpeningBalance(ctx context.Context, accountID, userID, amount int64) error {
+	bankRawID := fmt.Sprintf("opening_%d", accountID)
+	if amount == 0 {
+		_, err := r.db.ExecContext(ctx, "DELETE FROM transactions WHERE bank_raw_id = $1", bankRawID)
+		return err
+	}
+	// Use min(date) - 1 day so the opening row always sorts before imported transactions.
+	var minDate time.Time
+	row := r.db.QueryRowContext(ctx,
+		"SELECT COALESCE(MIN(date), NOW()) FROM transactions WHERE account_id = $1 AND flow != 'OPENING'",
+		accountID)
+	if err := row.Scan(&minDate); err != nil {
+		minDate = time.Now()
+	}
+	date := minDate.AddDate(0, 0, -1)
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO transactions (date, description, flow, amount, source, bank_raw_id, currency, account_id, user_id, tags)
+		VALUES ($1, 'Saldo inicial', 'OPENING', $2, 'opening', $3, 'CLP', $4, $5, '{}')
+		ON CONFLICT ON CONSTRAINT transactions_dedup DO UPDATE SET amount = excluded.amount, date = excluded.date
+	`, date, amount, bankRawID, accountID, userID)
+	return err
 }
 
 func (r *transactionRepo) CreateBatch(ctx context.Context, params []domain.CreateTransactionParams) (imported, duplicates int, err error) {
@@ -308,4 +315,44 @@ func (r *transactionRepo) CreateBatch(ctx context.Context, params []domain.Creat
 	}
 
 	return imported, duplicates, tx.Commit()
+}
+
+func (r *transactionRepo) LatestBankDate(ctx context.Context, accountID int64) (time.Time, bool, error) {
+	var nt sql.NullTime
+	err := r.db.QueryRowContext(ctx,
+		`SELECT MAX(date) FROM transactions WHERE source = 'bank_json' AND account_id = $1`,
+		accountID,
+	).Scan(&nt)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return nt.Time, nt.Valid, nil
+}
+
+// DedupCandidates returns bank_json and pdf transactions for accountID in a ±2-day
+// window around [minDate, maxDate]. Used by PDF import for cross-source dedup:
+// the wider window covers posting-date lag (a transfer initiated Apr 29 may appear
+// as May 1 in the bank API).
+func (r *transactionRepo) DedupCandidates(ctx context.Context, accountID int64, minDate, maxDate time.Time) ([]domain.DedupCandidate, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT date, amount, flow, description, source
+		FROM transactions
+		WHERE account_id = $1
+		  AND source IN ('bank_json', 'pdf')
+		  AND date >= $2::date - INTERVAL '2 days'
+		  AND date <= $3::date + INTERVAL '2 days'
+	`, accountID, minDate, maxDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.DedupCandidate
+	for rows.Next() {
+		var c domain.DedupCandidate
+		if err := rows.Scan(&c.Date, &c.Amount, &c.Flow, &c.Description, &c.Source); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }

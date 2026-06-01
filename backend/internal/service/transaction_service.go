@@ -2,8 +2,6 @@ package service
 
 import (
 	"context"
-	"strings"
-	"unicode"
 
 	"arasaka/internal/domain"
 )
@@ -17,58 +15,6 @@ type TransactionService struct {
 
 func NewTransactionService(repo domain.TransactionRepository, userTagRepo domain.UserTagRepository, inferenceSvc *TagInferenceService) *TransactionService {
 	return &TransactionService{repo: repo, userTagRepo: userTagRepo, inferenceSvc: inferenceSvc}
-}
-
-// splitCamelCase inserts "-" before each uppercase letter preceded by a lowercase letter.
-func splitCamelCase(s string) string {
-	var b strings.Builder
-	runes := []rune(s)
-	for i, r := range runes {
-		if i > 0 && unicode.IsUpper(r) && unicode.IsLower(runes[i-1]) {
-			b.WriteRune('-')
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
-}
-
-// toTagFormat normalizes a tag: split on spaces/hyphens/underscores and camelCase boundaries,
-// lowercase all, join with "-", capitalize first letter only.
-// e.g. "comidaMascota" → "Comida-mascota", "INVERSION" → "Inversion", "My Tag" → "My-tag"
-func toTagFormat(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return ""
-	}
-	s = splitCamelCase(s)
-	words := strings.FieldsFunc(s, func(r rune) bool {
-		return r == ' ' || r == '-' || r == '_'
-	})
-	if len(words) == 0 {
-		return ""
-	}
-	result := strings.ToLower(strings.Join(words, "-"))
-	runes := []rune(result)
-	runes[0] = unicode.ToUpper(runes[0])
-	return string(runes)
-}
-
-// normalizeTags converts tags to standard format, trims, and deduplicates.
-func normalizeTags(tags []string) []string {
-	seen := make(map[string]struct{}, len(tags))
-	out := make([]string, 0, len(tags))
-	for _, t := range tags {
-		t = toTagFormat(t)
-		if t == "" {
-			continue
-		}
-		if _, dup := seen[t]; dup {
-			continue
-		}
-		seen[t] = struct{}{}
-		out = append(out, t)
-	}
-	return out
 }
 
 func (s *TransactionService) List(ctx context.Context, f domain.TransactionFilter) ([]domain.Transaction, error) {
@@ -88,17 +34,28 @@ func (s *TransactionService) Create(ctx context.Context, p domain.CreateTransact
 	return t, nil
 }
 
-func (s *TransactionService) Update(ctx context.Context, id int64, p domain.UpdateTransactionParams) (domain.Transaction, error) {
+func (s *TransactionService) Update(ctx context.Context, id int64, userID int64, p domain.UpdateTransactionParams) (domain.Transaction, error) {
+	var oldTags []string
 	if p.Tags != nil {
+		old, err := s.repo.GetByID(ctx, id, userID)
+		if err != nil {
+			return domain.Transaction{}, err
+		}
+		oldTags = old.Tags
 		normalized := normalizeTags(*p.Tags)
 		p.Tags = &normalized
 	}
-	t, err := s.repo.Update(ctx, id, p)
+	t, err := s.repo.Update(ctx, id, userID, p)
 	if err != nil {
 		return t, err
 	}
 	if p.Tags != nil {
-		s.upsertTags(ctx, t.UserID, t.Tags)
+		added := setDiff(t.Tags, oldTags)
+		removed := setDiff(oldTags, t.Tags)
+		s.upsertTags(ctx, t.UserID, added)
+		if len(removed) > 0 && t.UserID != nil {
+			_ = s.userTagRepo.DecrementBatch(ctx, *t.UserID, removed)
+		}
 	}
 	rememberDesc := p.RememberDescription != nil && *p.RememberDescription
 	if s.inferenceSvc != nil && t.UserID != nil && (len(t.Tags) > 0 || (p.CustomDescription != nil && rememberDesc)) {
@@ -108,20 +65,42 @@ func (s *TransactionService) Update(ctx context.Context, id int64, p domain.Upda
 }
 
 func (s *TransactionService) upsertTags(ctx context.Context, userID *int64, tags []string) {
-	if userID == nil {
+	if userID == nil || len(tags) == 0 {
 		return
 	}
-	for _, tag := range tags {
-		_ = s.userTagRepo.Upsert(ctx, *userID, tag)
-	}
+	_ = s.userTagRepo.UpsertBatch(ctx, *userID, tags)
 }
 
-func (s *TransactionService) Delete(ctx context.Context, id int64) error {
-	return s.repo.Delete(ctx, id)
+func (s *TransactionService) Delete(ctx context.Context, id int64, userID int64) error {
+	t, err := s.repo.GetByID(ctx, id, userID)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.Delete(ctx, id, userID); err != nil {
+		return err
+	}
+	if t.UserID != nil && len(t.Tags) > 0 {
+		_ = s.userTagRepo.DecrementBatch(ctx, *t.UserID, t.Tags)
+	}
+	return nil
 }
 
 func (s *TransactionService) ListUsedTags(ctx context.Context, userID int64, limit int) ([]string, error) {
-	return s.repo.ListUsedTags(ctx, userID, limit)
+	return s.userTagRepo.ListMostUsed(ctx, userID, limit)
+}
+
+func setDiff(a, b []string) []string {
+	bSet := make(map[string]struct{}, len(b))
+	for _, t := range b {
+		bSet[t] = struct{}{}
+	}
+	var diff []string
+	for _, t := range a {
+		if _, ok := bSet[t]; !ok {
+			diff = append(diff, t)
+		}
+	}
+	return diff
 }
 
 func (s *TransactionService) TagSpending(ctx context.Context, userID int64, year, month int, accountID *int64) ([]domain.TagSummary, error) {

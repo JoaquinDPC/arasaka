@@ -17,16 +17,26 @@ import CreditCard from './pages/CreditCard'
 const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS_AUTH === 'true'
 const DEV_USER = { id: 1, email: 'dev@local' }
 
+function decodeToken(token) {
+  try {
+    const [, payload] = token.split('.')
+    const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')))
+    if (!decoded.user_id || !decoded.email) return null
+    return { id: decoded.user_id, email: decoded.email }
+  } catch { return null }
+}
+
 function getUser() {
   if (DEV_BYPASS) return DEV_USER
-  try { return JSON.parse(localStorage.getItem('arasaka_user')) } catch { return null }
+  const token = localStorage.getItem('arasaka_token')
+  if (!token) return null
+  return decodeToken(token)
 }
 
 export default function App() {
   const [user, setUser] = useState(() => getUser())
 
   const handleLogout = useCallback(() => {
-    localStorage.removeItem('arasaka_user')
     localStorage.removeItem('arasaka_token')
     setUser(null)
   }, [])
@@ -37,10 +47,9 @@ export default function App() {
     return () => window.removeEventListener('arasaka:unauthorized', handleLogout)
   }, [handleLogout])
 
-  function handleLogin({ token, user: u }) {
+  function handleLogin({ token }) {
     localStorage.setItem('arasaka_token', token)
-    localStorage.setItem('arasaka_user', JSON.stringify(u))
-    setUser(u)
+    setUser(decodeToken(token))
   }
 
   if (!user) return <Login onLogin={handleLogin} />

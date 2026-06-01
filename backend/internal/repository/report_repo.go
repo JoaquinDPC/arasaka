@@ -324,14 +324,15 @@ func (r *reportRepo) AllTimeTagTotals(ctx context.Context, userID int64, account
 	return result, rows.Err()
 }
 
+// TODO: this should look for active stallments instead of scanning credit card items
 func (r *reportRepo) ActiveInstallments(ctx context.Context, userID int64) ([]domain.CreditCardItem, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, statement_id, date, description, amount, currency,
+		SELECT id, bill_id, date, description, amount, currency,
 		       installment_current, installment_total, item_type, bank_raw_id, created_at
 		FROM credit_card_items
 		WHERE installment_total > 1
 		  AND installment_current < installment_total
-		  AND statement_id IN (SELECT id FROM credit_card_statements WHERE user_id = $1)
+		  AND bill_id IN (SELECT id FROM credit_card_bills WHERE user_id = $1)
 		ORDER BY date DESC
 	`, userID)
 	if err != nil {
@@ -343,7 +344,7 @@ func (r *reportRepo) ActiveInstallments(ctx context.Context, userID int64) ([]do
 	for rows.Next() {
 		var item domain.CreditCardItem
 		if err := rows.Scan(
-			&item.ID, &item.StatementID, &item.Date, &item.Description,
+			&item.ID, &item.BillID, &item.Date, &item.Description,
 			&item.Amount, &item.Currency,
 			&item.InstallmentCurrent, &item.InstallmentTotal,
 			&item.ItemType, &item.BankRawID, &item.CreatedAt,
